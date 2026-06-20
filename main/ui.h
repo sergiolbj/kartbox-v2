@@ -109,6 +109,27 @@ void ui_on_track_loaded(const track_config_t *cfg);
  */
 bool ui_get_track_draft(track_config_t *out);
 
+/* ------------------------------------------------------------------
+ * BLE Security (Parte B)
+ * ------------------------------------------------------------------ */
+
+/**
+ * @brief Exibe o passkey SMP de 6 digitos no display.
+ *
+ * Chamado por ble_telemetry.c quando o NimBLE SMP solicita que o device
+ * exiba o passkey para o usuario digitar no celular.
+ * A tela deve mostrar o codigo ate a proxima conexao ou ate ser chamado
+ * novamente (ex: popup centralizado, nao some automaticamente).
+ *
+ * @param passkey Valor de 0 a 999999 — exibir com zero-padding: "%06" PRIu32
+ *
+ * Pode ser chamado de qualquer contexto; adquire o lock LVGL internamente.
+ */
+void ui_show_ble_passkey(uint32_t passkey);
+
+/** @brief Esconde o overlay de passkey (chame apos conexao estabelecida). */
+void ui_hide_ble_passkey(void);
+
 #ifdef __cplusplus
 }
 #endif

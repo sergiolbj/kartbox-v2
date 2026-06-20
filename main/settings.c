@@ -23,6 +23,7 @@ static char             s_ble_name[32];
 static char             s_wifi_password[64];
 static settings_sector_t s_sectors[SETTINGS_MAX_SECTORS];
 static char             s_last_track[SETTINGS_TRACK_NAME_MAX];
+static char             s_ble_pin[SETTINGS_BLE_PIN_MAX + 1];
 
 static void load_blob_or_default(const char *key, void *out, size_t size, const void *def)
 {
@@ -71,12 +72,16 @@ void settings_init(void)
     /* ultima pista usada - default = vazio (nenhuma pista carregada ainda) */
     load_str_or_default("last_track", s_last_track, sizeof(s_last_track), "");
 
-    ESP_LOGI(TAG, "Config carregada: utc=%dmin gate=%.1fm minlap=%lums ble=\"%s\" sec0=%s sec1=%s last_track=\"%s\"",
+    /* PIN BLE - default = vazio (PIN desativado ate o usuario configurar) */
+    load_str_or_default("ble_pin", s_ble_pin, sizeof(s_ble_pin), "");
+
+    ESP_LOGI(TAG, "Config carregada: utc=%dmin gate=%.1fm minlap=%lums ble=\"%s\" sec0=%s sec1=%s last_track=\"%s\" pin=%s",
              s_utc_offset_min, (double)s_gate_radius_m,
              (unsigned long)s_min_lap_time_ms, s_ble_name,
              s_sectors[0].is_set ? "ok" : "--",
              s_sectors[1].is_set ? "ok" : "--",
-             s_last_track[0] ? s_last_track : "(nenhuma)");
+             s_last_track[0] ? s_last_track : "(nenhuma)",
+             s_ble_pin[0] ? "****" : "(desativado)");
 }
 
 int16_t settings_get_utc_offset_min(void) { return s_utc_offset_min; }
@@ -178,6 +183,18 @@ void settings_set_last_track(const char *name)
     s_last_track[sizeof(s_last_track) - 1] = '\0';
     if (s_nvs_ok) {
         nvs_set_str(s_nvs, "last_track", s_last_track);
+        nvs_commit(s_nvs);
+    }
+}
+
+const char *settings_get_ble_pin(void) { return s_ble_pin; }
+void settings_set_ble_pin(const char *pin)
+{
+    if (!pin) pin = "";
+    strncpy(s_ble_pin, pin, SETTINGS_BLE_PIN_MAX);
+    s_ble_pin[SETTINGS_BLE_PIN_MAX] = '\0';
+    if (s_nvs_ok) {
+        nvs_set_str(s_nvs, "ble_pin", s_ble_pin);
         nvs_commit(s_nvs);
     }
 }

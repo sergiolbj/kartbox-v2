@@ -23,8 +23,22 @@
  *   BLE_RSP_ERR  (0x01) — erro, payload e mensagem de texto opcional
  *   BLE_RSP_MORE (0x02) — mais chunks virao (acumular no celular)
  *
+ * SEGURANCA (dupla camada)
+ * -----------------------
+ * Parte B — BLE SMP pairing com passkey de 6 digitos exibido no display.
+ *   IO capability: DISP_ONLY. Bonding habilitado (vincula uma vez, nao pede
+ *   passkey novamente para devices ja vinculados).
+ *   MITM + Secure Connections — conexao e criptografada.
+ *
+ * Parte A — PIN de aplicacao por sessao (verificado apos o pairing).
+ *   O comando 0x00 AUTH deve ser enviado antes de qualquer outro.
+ *   Sem AUTH valido, todos os comandos retornam BLE_RSP_ERR "nao autenticado".
+ *   Telemetria notify (CHR 0001) permanece publica — e so leitura.
+ *   PIN vazio em NVS desativa a verificacao de PIN (SMP ainda exige pairing).
+ *
  * COMANDOS
  * --------
+ * 0x00 AUTH              payload: pin(str, ate 8 chars)    ret: OK / ERR
  * 0x01 GET_SETTINGS      payload: —                ret: ble_settings_payload_t
  * 0x02 SET_SETTINGS      payload: ble_settings_payload_t  ret: OK/ERR
  * 0x03 LIST_TRACKS       payload: —                ret: nomes \n-separados (chunked se >BLE_CHUNK_SIZE)
@@ -67,6 +81,7 @@ typedef struct __attribute__((packed)) {
 
 /* ── Protocolo de controle (CHR 0003 write / CHR 0004 notify) ─────────── */
 
+#define BLE_CMD_AUTH              0x00
 #define BLE_CMD_GET_SETTINGS      0x01
 #define BLE_CMD_SET_SETTINGS      0x02
 #define BLE_CMD_LIST_TRACKS       0x03
@@ -91,7 +106,8 @@ typedef struct __attribute__((packed)) {
     uint32_t min_lap_ms;
     char     ble_name[32];
     char     wifi_pass[32];
-} ble_settings_payload_t;      /* 74 bytes */
+    char     ble_pin[8];       /* PIN de autenticacao (Parte A); vazio = PIN desativado */
+} ble_settings_payload_t;      /* 82 bytes */
 
 /* Payload de pista — versao packed, evita ambiguidade de padding entre
  * compiladores (track_config_t usa bool que pode ser 1 ou 4 bytes) */

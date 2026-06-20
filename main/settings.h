@@ -68,6 +68,19 @@ void settings_clear_sector(int idx);
 const char *settings_get_last_track(void);
 void        settings_set_last_track(const char *name);
 
+/* ------------------------------------------------------------------
+ * PIN de autenticacao BLE (Parte A da seguranca dupla).
+ *
+ * String de ate 8 caracteres numericos/alfanumericos.
+ * Se vazio (""), autenticacao por PIN esta desativada e qualquer
+ * client que completar o pairing SMP pode usar os comandos.
+ * Chave NVS: "ble_pin".
+ * ------------------------------------------------------------------ */
+#define SETTINGS_BLE_PIN_MAX (8)
+
+const char *settings_get_ble_pin(void);
+void        settings_set_ble_pin(const char *pin);
+
 #ifdef __cplusplus
 }
 #endif

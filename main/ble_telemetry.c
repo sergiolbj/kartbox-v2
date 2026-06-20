@@ -11,6 +11,7 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <inttypes.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -20,8 +21,11 @@
 #include "nimble/nimble_port_freertos.h"
 #include "host/ble_hs.h"
 #include "host/ble_uuid.h"
+#include "host/ble_sm.h"
 #include "services/gap/ble_svc_gap.h"
 #include "services/gatt/ble_svc_gatt.h"
+
+#include "ui.h"
 
 static const char *TAG = "ble_telemetry";
 
@@ -53,6 +57,7 @@ static uint16_t s_cmd_val_handle;
 static uint16_t s_rsp_val_handle;
 static volatile bool s_telem_subscribed = false;
 static volatile bool s_rsp_subscribed   = false;
+static volatile bool s_authed           = false;  /* Parte A: limpo a cada conexao */
 static ble_telemetry_packet_t s_last_packet;
 static char s_device_name[32] = BLE_DEVICE_NAME_DEFAULT;
 
@@ -89,6 +94,7 @@ static void handle_get_settings(uint8_t seq)
     };
     strncpy(p.ble_name,  settings_get_ble_name(),      sizeof(p.ble_name)  - 1);
     strncpy(p.wifi_pass, settings_get_wifi_password(), sizeof(p.wifi_pass) - 1);
+    strncpy(p.ble_pin,   settings_get_ble_pin(),       sizeof(p.ble_pin)   - 1);
     send_rsp(BLE_CMD_GET_SETTINGS, seq, BLE_RSP_OK, &p, sizeof(p));
 }
 
@@ -104,8 +110,40 @@ static void handle_set_settings(uint8_t seq, const uint8_t *payload, uint16_t le
     settings_set_min_lap_time_ms(p->min_lap_ms);
     if (p->ble_name[0])  settings_set_ble_name(p->ble_name);
     if (p->wifi_pass[0]) settings_set_wifi_password(p->wifi_pass);
+    /* ble_pin pode ser limpo (string vazia = desativa PIN) */
+    settings_set_ble_pin(p->ble_pin);
+    /* nova sessao precisa re-autenticar com o novo PIN */
+    s_authed = false;
     send_rsp(BLE_CMD_SET_SETTINGS, seq, BLE_RSP_OK, NULL, 0);
     ESP_LOGI(TAG, "Settings atualizados via BLE");
+}
+
+static void handle_auth(uint8_t seq, const uint8_t *payload, uint16_t len)
+{
+    const char *stored_pin = settings_get_ble_pin();
+
+    /* PIN vazio em NVS = autenticacao desativada, aceita qualquer coisa */
+    if (stored_pin[0] == '\0') {
+        s_authed = true;
+        send_rsp(BLE_CMD_AUTH, seq, BLE_RSP_OK, NULL, 0);
+        ESP_LOGI(TAG, "AUTH: PIN desativado, acesso liberado");
+        return;
+    }
+
+    /* Extrai PIN do payload (nao e NUL-terminated, adiciona manualmente) */
+    char pin_buf[SETTINGS_BLE_PIN_MAX + 1] = {0};
+    uint16_t copy_len = len < SETTINGS_BLE_PIN_MAX ? len : SETTINGS_BLE_PIN_MAX;
+    if (copy_len > 0) memcpy(pin_buf, payload, copy_len);
+
+    if (strcmp(pin_buf, stored_pin) == 0) {
+        s_authed = true;
+        send_rsp(BLE_CMD_AUTH, seq, BLE_RSP_OK, NULL, 0);
+        ESP_LOGI(TAG, "AUTH: PIN correto, sessao autenticada");
+    } else {
+        s_authed = false;
+        send_rsp(BLE_CMD_AUTH, seq, BLE_RSP_ERR, "pin invalido", 12);
+        ESP_LOGW(TAG, "AUTH: PIN incorreto");
+    }
 }
 
 static void handle_list_tracks(uint8_t seq)
@@ -291,6 +329,19 @@ static void handle_del_all_sessions(uint8_t seq)
 
 static void dispatch_cmd(const ble_cmd_item_t *item)
 {
+    /* AUTH e sempre permitido (e o proprio mecanismo de autenticacao) */
+    if (item->cmd == BLE_CMD_AUTH) {
+        handle_auth(item->seq, item->payload, item->payload_len);
+        return;
+    }
+
+    /* Todos os outros comandos requerem autenticacao previa */
+    if (!s_authed) {
+        send_rsp(item->cmd, item->seq, BLE_RSP_ERR, "nao autenticado", 15);
+        ESP_LOGW(TAG, "Cmd 0x%02X rejeitado: sessao nao autenticada", item->cmd);
+        return;
+    }
+
     switch (item->cmd) {
     case BLE_CMD_GET_SETTINGS:
         handle_get_settings(item->seq);
@@ -484,6 +535,7 @@ static int gap_event_handler(struct ble_gap_event *event, void *arg)
             s_conn_handle = event->connect.conn_handle;
             s_telem_subscribed = false;
             s_rsp_subscribed   = false;
+            s_authed           = false;  /* nova sessao sempre começa sem auth */
             ESP_LOGI(TAG, "Central conectou (handle %d)", s_conn_handle);
         } else {
             start_advertising();
@@ -495,7 +547,25 @@ static int gap_event_handler(struct ble_gap_event *event, void *arg)
         s_conn_handle      = BLE_HS_CONN_HANDLE_NONE;
         s_telem_subscribed = false;
         s_rsp_subscribed   = false;
+        s_authed           = false;
         start_advertising();
+        return 0;
+
+    case BLE_GAP_EVENT_ENC_CHANGE:
+        /* Pairing/encryption concluido — esconde o passkey do display */
+        if (event->enc_change.status == 0) {
+            ui_hide_ble_passkey();
+            ESP_LOGI(TAG, "SMP pairing concluido, criptografia ativa");
+        }
+        return 0;
+
+    case BLE_GAP_EVENT_PASSKEY_ACTION:
+        /* SMP Parte B: exibe passkey de 6 digitos no display LVGL */
+        if (event->passkey.params.action == BLE_SM_IOACT_DISP) {
+            uint32_t passkey = event->passkey.params.numval;
+            ESP_LOGI(TAG, "SMP passkey: %06" PRIu32, passkey);
+            ui_show_ble_passkey(passkey);
+        }
         return 0;
 
     case BLE_GAP_EVENT_SUBSCRIBE:
@@ -621,6 +691,16 @@ void ble_telemetry_init(void)
 
     ble_hs_cfg.sync_cb  = ble_on_sync;
     ble_hs_cfg.reset_cb = ble_on_reset;
+
+    /* ── SMP (Parte B): pairing com passkey exibido no display ─────────────
+     * IO capability DISP_ONLY: device mostra passkey, central digita.
+     * Bonding habilitado: apos primeiro pairing com MITM + SC, o vinculo
+     * e armazenado — cliente ja conhecido nao precisa digitar novamente.
+     * ---------------------------------------------------------------------- */
+    ble_hs_cfg.sm_io_cap   = BLE_SM_IO_CAP_DISP_ONLY;
+    ble_hs_cfg.sm_bonding  = 1;
+    ble_hs_cfg.sm_mitm     = 1;
+    ble_hs_cfg.sm_sc       = 1;  /* Secure Connections (BLE 4.2+) */
 
     ble_svc_gap_init();
     ble_svc_gatt_init();

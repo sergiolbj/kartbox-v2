@@ -23,9 +23,11 @@
 
 #include <stdio.h>
 #include <stdint.h>
+#include <inttypes.h>
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
+#include "esp_log.h"
 
 /* ----------------------------------------------------------------------
  * Paleta - preto puro de fundo, verde de marca pra "bom", vermelho pra
@@ -93,6 +95,10 @@ static int         s_slow_tick = 0;
 static lv_obj_t  *s_toast_box;
 static lv_obj_t  *s_toast_label;
 static lv_timer_t *s_toast_timer;
+
+/* BLE passkey overlay - mostra o codigo SMP de 6 digitos */
+static lv_obj_t  *s_passkey_overlay;
+static lv_obj_t  *s_passkey_label;
 
 /* Hold-progress - barra que anima enquanto piloto segura RESET pra encerrar */
 static lv_obj_t  *s_hold_overlay;
@@ -1258,6 +1264,33 @@ void ui_init(lv_display_t *disp)
     lv_bar_set_value(s_hold_bar, 0, LV_ANIM_OFF);
     lv_obj_add_flag(s_hold_overlay, LV_OBJ_FLAG_HIDDEN);
 
+    /* Passkey overlay — exibe codigo SMP de 6 digitos pra pareamento BLE */
+    s_passkey_overlay = bare(layer);
+    lv_obj_set_size(s_passkey_overlay, 280, LV_SIZE_CONTENT);
+    lv_obj_align(s_passkey_overlay, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_bg_color(s_passkey_overlay, LV_COLOR_MAKE(0x08, 0x0F, 0x18), 0);
+    lv_obj_set_style_bg_opa(s_passkey_overlay, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(s_passkey_overlay, COLOR_BLUE, 0);
+    lv_obj_set_style_border_width(s_passkey_overlay, 2, 0);
+    lv_obj_set_style_pad_ver(s_passkey_overlay, 20, 0);
+    lv_obj_set_style_pad_hor(s_passkey_overlay, 24, 0);
+    lv_obj_set_flex_flow(s_passkey_overlay, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(s_passkey_overlay, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(s_passkey_overlay, 10, 0);
+    lv_obj_t *pk_title = lv_label_create(s_passkey_overlay);
+    lv_obj_set_style_text_font(pk_title, &font_kartbox_sm, 0);
+    lv_obj_set_style_text_color(pk_title, COLOR_BLUE, 0);
+    lv_label_set_text(pk_title, "BLUETOOTH PASSKEY");
+    lv_obj_t *pk_hint = lv_label_create(s_passkey_overlay);
+    lv_obj_set_style_text_font(pk_hint, &font_kartbox_sm, 0);
+    lv_obj_set_style_text_color(pk_hint, COLOR_MUTED, 0);
+    lv_label_set_text(pk_hint, "Digite no celular:");
+    s_passkey_label = lv_label_create(s_passkey_overlay);
+    lv_obj_set_style_text_font(s_passkey_label, &font_kartbox_lg, 0);
+    lv_obj_set_style_text_color(s_passkey_label, COLOR_TEXT, 0);
+    lv_label_set_text(s_passkey_label, "------");
+    lv_obj_add_flag(s_passkey_overlay, LV_OBJ_FLAG_HIDDEN);
+
     s_refresh_timer = lv_timer_create(refresh_timer_cb, 100, NULL);
 
     ui_refresh_session_list();
@@ -1483,3 +1516,25 @@ void ui_show_session_laps(uint32_t session_index)
         }
     }
 }
+
+/* ----------------------------------------------------------------------
+ * BLE passkey overlay (Parte B da seguranca)
+ * ---------------------------------------------------------------------- */
+void ui_show_ble_passkey(uint32_t passkey)
+{
+    if (!lvgl_port_lock(0)) return;
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%06" PRIu32, passkey);
+    lv_label_set_text(s_passkey_label, buf);
+    lv_obj_clear_flag(s_passkey_overlay, LV_OBJ_FLAG_HIDDEN);
+    lvgl_port_unlock();
+    ESP_LOGI("ui", "Passkey BLE exibido: %s", buf);
+}
+
+void ui_hide_ble_passkey(void)
+{
+    if (!lvgl_port_lock(0)) return;
+    lv_obj_add_flag(s_passkey_overlay, LV_OBJ_FLAG_HIDDEN);
+    lvgl_port_unlock();
+}
+

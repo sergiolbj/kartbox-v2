@@ -158,6 +158,20 @@ button{cursor:pointer}
   </div>
 </div>
 
+<!-- PIN AUTH -->
+<div id="pin-screen" style="display:none;flex:1;flex-direction:column;align-items:center;justify-content:center;gap:22px;padding:32px;background:#ffffff">
+  <div style="text-align:center">
+    <div style="font-size:22px;font-weight:bold;color:#1a1a1a;letter-spacing:2px">🔒 PIN</div>
+    <div style="font-size:11px;color:#888;margin-top:6px">Digite o PIN de segurança do KartBox</div>
+  </div>
+  <input id="pin-input" type="password" inputmode="numeric" maxlength="8"
+    placeholder="PIN (até 8 dígitos)"
+    style="width:100%;max-width:280px;padding:12px 14px;border:1px solid #e0e0e0;border-radius:6px;font-size:16px;letter-spacing:4px;text-align:center;font-family:'Courier New',monospace;outline:none"
+    onkeydown="if(event.key==='Enter')doAuth()">
+  <button onclick="doAuth()" style="width:100%;max-width:280px;padding:14px;border:1px solid #4caf50;background:#f1f8f1;color:#2e7d32;font-size:14px;border-radius:6px;letter-spacing:1.5px">AUTENTICAR</button>
+  <div id="pin-err" style="font-size:11px;color:#e53935;text-align:center;min-height:16px"></div>
+</div>
+
 <!-- MAIN -->
 <div id="main">
   <div id="tabbar">
@@ -225,10 +239,13 @@ button{cursor:pointer}
       <div class="row"><span class="row-lbl">Senha WiFi</span>
         <input class="finp" id="cfg-wifipass" type="password" maxlength="31">
       </div>
+      <div class="row"><span class="row-lbl">PIN BLE (até 8 chars)</span>
+        <input class="finp" id="cfg-pin" type="password" maxlength="8" placeholder="vazio = sem PIN">
+      </div>
 
       <button class="abtn g" onclick="cfgLoad()">↓ Ler do dispositivo</button>
       <button class="abtn"   onclick="cfgSave()">↑ Salvar no dispositivo</button>
-      <div class="fnote">Alterações são aplicadas imediatamente e persistem em NVS.</div>
+      <div class="fnote">Alterações são aplicadas imediatamente e persistem em NVS. PIN vazio desativa a autenticação.</div>
     </div>
 
     <!-- ── PISTAS ── -->
@@ -291,7 +308,8 @@ const CHR_CMD   = 'a1b2c3d4-0003-4a5b-8c9d-0123456789ab';
 const CHR_RSP   = 'a1b2c3d4-0004-4a5b-8c9d-0123456789ab';
 
 /* ── Códigos de comando / status ────────────────────────────────────── */
-const CMD = { GET_SETTINGS:0x01, SET_SETTINGS:0x02, LIST_TRACKS:0x03,
+const CMD = { AUTH:0x00,
+              GET_SETTINGS:0x01, SET_SETTINGS:0x02, LIST_TRACKS:0x03,
               GET_TRACK:0x04, PUT_TRACK:0x05, DEL_TRACK:0x06,
               LIST_SESSIONS:0x10, GET_SESSION:0x11, DEL_ALL_SESSIONS:0x12 };
 const RSP = { OK:0x00, ERR:0x01, MORE:0x02 };
@@ -401,20 +419,23 @@ function decodeSettings(buf) {
     min_lap_ms:     v.getUint32(6, true),
     ble_name:  dec.decode(buf.slice(10, 42)).replace(/\0/g,''),
     wifi_pass: dec.decode(buf.slice(42, 74)).replace(/\0/g,''),
+    ble_pin:   dec.decode(buf.slice(74, 82)).replace(/\0/g,''),
   };
 }
 
 function encodeSettings(s) {
   const enc = new TextEncoder();
-  const buf = new Uint8Array(74);
+  const buf = new Uint8Array(82);
   const v   = new DataView(buf.buffer);
   v.setInt16(0,   s.utc_offset_min, true);
   v.setFloat32(2, s.gate_radius_m,  true);
   v.setUint32(6,  s.min_lap_ms,     true);
   const bn = enc.encode(s.ble_name.slice(0,31));
   const wp = enc.encode(s.wifi_pass.slice(0,31));
+  const bp = enc.encode((s.ble_pin||'').slice(0,8));
   buf.set(bn, 10);
   buf.set(wp, 42);
+  buf.set(bp, 74);
   return buf;
 }
 
@@ -704,13 +725,18 @@ async function doConnect() {
 
     setBle(true, dev.name);
     document.getElementById('conn-screen').style.display = 'none';
-    document.getElementById('main').style.display = 'flex';
     document.getElementById('gps-row').style.display = 'flex';
 
-    /* Carrega dados iniciais */
-    cfgLoad();
-    trackLoad();
-    sessLoad();
+    /* Parte A — tenta auth com PIN vazio; se falhar mostra tela de PIN */
+    try {
+      await sendCmd(CMD.AUTH, new Uint8Array(0));
+      /* PIN desativado no dispositivo — entra direto */
+      showMain();
+    } catch(e) {
+      /* PIN requerido */
+      document.getElementById('pin-screen').style.display = 'flex';
+      document.getElementById('pin-input').focus();
+    }
 
   } catch(e) {
     errEl.textContent = e.message || 'Falha ao conectar.';
@@ -718,13 +744,40 @@ async function doConnect() {
   }
 }
 
+async function doAuth() {
+  const input  = document.getElementById('pin-input');
+  const errEl  = document.getElementById('pin-err');
+  const pin    = input.value.trim();
+  errEl.textContent = '';
+  try {
+    const enc = new TextEncoder();
+    await sendCmd(CMD.AUTH, enc.encode(pin));
+    document.getElementById('pin-screen').style.display = 'none';
+    showMain();
+  } catch(e) {
+    errEl.textContent = 'PIN incorreto. Tente novamente.';
+    input.value = '';
+    input.focus();
+  }
+}
+
+function showMain() {
+  document.getElementById('main').style.display = 'flex';
+  cfgLoad();
+  trackLoad();
+  sessLoad();
+}
+
 function onDisconn() {
   setBle(false);
   lapHistory=[]; _prevLapNum=0; _prevBestMs=0; _lapMaxSpd=0; _frozenDelta=null;
   renderLapHist();
   document.getElementById('conn-screen').style.display = 'flex';
-  document.getElementById('main').style.display = 'none';
-  document.getElementById('gps-row').style.display = 'none';
+  document.getElementById('pin-screen').style.display  = 'none';
+  document.getElementById('main').style.display        = 'none';
+  document.getElementById('gps-row').style.display     = 'none';
+  document.getElementById('pin-input').value  = '';
+  document.getElementById('pin-err').textContent = '';
   const btn = document.getElementById('btn-conn');
   btn.disabled = false; btn.textContent = 'CONECTAR';
 }
@@ -747,6 +800,7 @@ async function cfgLoad() {
     document.getElementById('cfg-minlap').value  = (s.min_lap_ms/1000).toFixed(0);
     document.getElementById('cfg-blename').value = s.ble_name;
     document.getElementById('cfg-wifipass').value= s.wifi_pass;
+    document.getElementById('cfg-pin').value     = s.ble_pin;
     status('Configurações carregadas ✓');
   } catch(e) { status('Erro: '+e.message); }
 }
@@ -759,6 +813,7 @@ async function cfgSave() {
       min_lap_ms:     parseInt(document.getElementById('cfg-minlap').value) * 1000,
       ble_name:  document.getElementById('cfg-blename').value,
       wifi_pass: document.getElementById('cfg-wifipass').value,
+      ble_pin:   document.getElementById('cfg-pin').value,
     };
     await sendCmd(CMD.SET_SETTINGS, encodeSettings(s));
     status('Configurações salvas ✓');
