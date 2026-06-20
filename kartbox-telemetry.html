@@ -7,94 +7,138 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>KartBox</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-html,body{height:100%;background:#0a0a0a;color:#e0e0e0;font-family:'Courier New',monospace;overflow:hidden}
+html,body{height:100%;background:#f5f5f5;color:#1a1a1a;font-family:'Courier New',monospace}
 body{display:flex;flex-direction:column}
 button,input,select{-webkit-appearance:none;appearance:none;font-family:'Courier New',monospace}
 button{cursor:pointer}
 
+/* ── App container ── */
+#app{display:flex;flex-direction:column;flex:1;overflow:hidden}
+
+/* ── Desktop: card centralizado ── */
+@media(min-width:600px){
+  html,body{overflow:auto;background:#e8e8e8}
+  body{align-items:center;justify-content:flex-start;padding:28px 16px 40px;min-height:100%}
+  #app{width:440px;flex:none;border-radius:16px;box-shadow:0 8px 40px rgba(0,0,0,.14);overflow:hidden;
+       height:min(820px,calc(100vh - 56px));position:relative}
+  /* Telemetria: números maiores no desktop */
+  #spd-val{font-size:110px}
+  #delta-val{font-size:44px}
+}
+
 /* STATUS BAR */
-#sbar{height:44px;background:#070707;border-bottom:1px solid #181818;display:flex;align-items:center;padding:0 14px;gap:10px;flex-shrink:0}
+#sbar{height:44px;background:#ffffff;border-bottom:1px solid #e0e0e0;display:flex;align-items:center;padding:0 14px;gap:10px;flex-shrink:0;box-shadow:0 1px 3px rgba(0,0,0,.06)}
 .dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex-shrink:0}
-#ble-name{font-size:11px;color:#555;flex:1}
-#gps-row{font-size:10px;color:#555;display:none;align-items:center;gap:5px}
-#btn-disc{padding:5px 11px;border:1px solid #3a1818;background:#100808;color:#cf4444;font-size:10px;border-radius:3px;display:none}
+#ble-name{font-size:11px;color:#999;flex:1}
+#gps-row{font-size:10px;color:#999;display:none;align-items:center;gap:5px}
+#btn-disc{padding:5px 11px;border:1px solid #ffcdd2;background:#fff5f5;color:#e53935;font-size:10px;border-radius:3px;display:none}
 #btn-disc:active{opacity:.6}
 
 /* CONNECT */
-#conn-screen{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:28px;padding:32px}
-#btn-conn{width:100%;max-width:280px;padding:15px;border:1px solid #1e4025;background:#0a1a0d;color:#4caf50;font-size:14px;border-radius:4px;letter-spacing:1.5px}
+#conn-screen{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:28px;padding:32px;background:#ffffff}
+#btn-conn{width:100%;max-width:280px;padding:15px;border:1px solid #4caf50;background:#f1f8f1;color:#2e7d32;font-size:14px;border-radius:6px;letter-spacing:1.5px}
 #btn-conn:disabled{opacity:.4}
 #btn-conn:not(:disabled):active{opacity:.6}
-#conn-err{font-size:11px;color:#cf4444;text-align:center;min-height:16px}
-.hint{font-size:11px;color:#2a2a2a;text-align:center;line-height:1.9}
+#conn-err{font-size:11px;color:#e53935;text-align:center;min-height:16px}
+.hint{font-size:11px;color:#bbb;text-align:center;line-height:1.9}
 
 /* MAIN (tabs) */
 #main{flex:1;display:none;flex-direction:column;overflow:hidden}
-#tabbar{height:44px;background:#070707;border-bottom:1px solid #181818;display:flex;flex-shrink:0}
-.tb{flex:1;background:transparent;border:none;border-bottom:2px solid transparent;color:#2e2e2e;font-size:10px;font-weight:bold;letter-spacing:.5px}
-.tb.on{color:#4caf50;border-bottom-color:#4caf50}
+#tabbar{height:44px;background:#ffffff;border-bottom:1px solid #e0e0e0;display:flex;flex-shrink:0;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.tb{flex:1;background:transparent;border:none;border-bottom:2px solid transparent;color:#bbb;font-size:10px;font-weight:bold;letter-spacing:.5px}
+.tb.on{color:#2e7d32;border-bottom-color:#4caf50}
 #pages{flex:1;position:relative;overflow:hidden}
-.page{position:absolute;inset:0;overflow-y:auto;display:none}
+.page{position:absolute;inset:0;overflow-y:auto;display:none;background:#f5f5f5}
 .page.on{display:block}
 
 /* ── TELEMETRIA ── */
-#spd-sec{display:flex;flex-direction:column;align-items:center;padding:14px 0 8px;border-bottom:1px solid #181818}
-#spd-val{font-size:100px;font-weight:bold;color:#f0f0f0;line-height:1;letter-spacing:-6px}
-#spd-unit{font-size:12px;color:#333;letter-spacing:3px;margin-top:2px}
-#times{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #181818}
-.tblk{padding:12px 16px;border-right:1px solid #181818}
+#spd-sec{display:flex;flex-direction:column;align-items:center;padding:14px 0 8px;border-bottom:1px solid #e8e8e8;background:#ffffff}
+#spd-val{font-size:100px;font-weight:bold;color:#111;line-height:1;letter-spacing:-6px}
+#spd-unit{font-size:12px;color:#bbb;letter-spacing:3px;margin-top:2px}
+#times{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #e8e8e8;background:#ffffff}
+.tblk{padding:12px 16px;border-right:1px solid #e8e8e8}
 .tblk:last-child{border-right:none}
-.tlbl{font-size:9px;color:#282828;letter-spacing:1px;text-transform:uppercase}
-.tval{font-size:22px;font-weight:bold;color:#bbb;letter-spacing:-1px;margin-top:4px}
-.tval.green{color:#4caf50}
-#delta-sec{padding:10px 16px;border-bottom:1px solid #181818;text-align:center}
-#delta-lbl{font-size:9px;color:#222;letter-spacing:1px}
-#delta-val{font-size:40px;font-weight:bold;color:#444;letter-spacing:-2px;margin-top:2px}
-#delta-val.ahead{color:#4caf50}
-#delta-val.behind{color:#cf4444}
-#btm{display:flex;padding:10px 16px;align-items:center;gap:16px}
-#lap-lbl{font-size:9px;color:#282828;letter-spacing:1px}
-#lap-num{font-size:24px;font-weight:bold;color:#888}
-#coords{font-size:10px;color:#1e1e1e;text-align:center;padding:4px 0 8px;letter-spacing:.3px}
+.tlbl{font-size:9px;color:#bbb;letter-spacing:1px;text-transform:uppercase}
+.tval{font-size:22px;font-weight:bold;color:#555;letter-spacing:-1px;margin-top:4px}
+.tval.green{color:#2e7d32}
+#delta-sec{padding:10px 16px;border-bottom:1px solid #e8e8e8;text-align:center;background:#ffffff}
+#delta-lbl{font-size:9px;color:#bbb;letter-spacing:1px}
+#delta-val{font-size:40px;font-weight:bold;color:#ccc;letter-spacing:-2px;margin-top:2px}
+#delta-val.ahead{color:#2e7d32}
+#delta-val.behind{color:#e53935}
+#btm{display:flex;padding:8px 14px 6px;align-items:baseline;gap:10px;border-bottom:1px solid #e8e8e8;flex-shrink:0;background:#ffffff}
+#lap-lbl{font-size:9px;color:#bbb;letter-spacing:1px}
+#lap-num{font-size:24px;font-weight:bold;color:#999}
+#coords{font-size:10px;color:#ccc;text-align:center;padding:4px 0 6px;letter-spacing:.3px}
+
+/* ── HISTÓRICO DE VOLTAS ── */
+#lap-hist-hdr{display:none;grid-template-columns:32px 1fr 1fr 1fr;padding:4px 14px;border-bottom:1px solid #efefef;gap:4px;background:#fafafa}
+#lap-hist-hdr span{font-size:8px;color:#bbb;letter-spacing:.8px;text-transform:uppercase}
+#lap-hist-rows .lrow{display:grid;grid-template-columns:32px 1fr 1fr 1fr;padding:5px 14px;border-bottom:1px solid #f0f0f0;gap:4px;align-items:center;background:#ffffff}
+#lap-hist-rows .lrow.best{background:#f1f8f1}
+#lap-hist-rows .lrow .ln{font-size:11px;color:#ccc}
+#lap-hist-rows .lrow.best .ln{color:#2e7d32}
+#lap-hist-rows .lrow .lt{font-size:12px;font-weight:bold;color:#888}
+#lap-hist-rows .lrow.best .lt{color:#2e7d32}
+#lap-hist-rows .lrow .ld{font-size:11px;color:#aaa}
+#lap-hist-rows .lrow .ld.pos{color:#e53935}
+#lap-hist-rows .lrow .ld.neg{color:#2e7d32}
+#lap-hist-rows .lrow .lv{font-size:10px;color:#bbb}
 
 /* ── FORM (config + outras abas) ── */
-.section{padding:10px 14px 4px;font-size:9px;color:#2e2e2e;letter-spacing:1px;text-transform:uppercase}
-.row{display:flex;align-items:center;min-height:44px;padding:0 14px;border-bottom:1px solid #111}
-.row-lbl{font-size:11px;color:#666;flex:1}
-.finp{height:30px;background:#111;border:1px solid #252525;color:#ccc;font-size:11px;padding:0 8px;border-radius:3px;width:160px;outline:none}
-.finp:focus{border-color:#3a3a3a}
-.fsel{height:30px;background:#111;border:1px solid #252525;color:#ccc;font-size:11px;padding:0 6px;border-radius:3px;width:160px;outline:none}
-.fnote{font-size:10px;color:#333;padding:4px 14px 8px;line-height:1.6}
+.section{padding:10px 14px 4px;font-size:9px;color:#bbb;letter-spacing:1px;text-transform:uppercase;background:#f5f5f5}
+.row{display:flex;align-items:center;min-height:44px;padding:0 14px;border-bottom:1px solid #efefef;background:#ffffff}
+.row-lbl{font-size:11px;color:#555;flex:1}
+.finp{height:30px;background:#f8f8f8;border:1px solid #e0e0e0;color:#333;font-size:11px;padding:0 8px;border-radius:3px;width:160px;outline:none}
+.finp:focus{border-color:#4caf50}
+.fsel{height:30px;background:#f8f8f8;border:1px solid #e0e0e0;color:#333;font-size:11px;padding:0 6px;border-radius:3px;width:160px;outline:none}
+.fnote{font-size:10px;color:#bbb;padding:4px 14px 8px;line-height:1.6;background:#f5f5f5}
 
 /* Botões de ação */
-.abtn{display:block;margin:8px 14px;padding:10px;border:1px solid #2e2e2e;background:#141414;color:#ccc;font-size:11px;border-radius:3px;text-align:center;width:calc(100% - 28px);letter-spacing:.3px}
+.abtn{display:block;margin:8px 14px;padding:10px;border:1px solid #e0e0e0;background:#ffffff;color:#555;font-size:11px;border-radius:4px;text-align:center;width:calc(100% - 28px);letter-spacing:.3px}
 .abtn:active{opacity:.6}
-.abtn.g{border-color:#1e4025;background:#0a1a0d;color:#4caf50}
-.abtn.r{border-color:#4a2020;background:#120808;color:#cf4444}
+.abtn.g{border-color:#4caf50;background:#f1f8f1;color:#2e7d32}
+.abtn.r{border-color:#ffcdd2;background:#fff5f5;color:#e53935}
 
 /* Lista de tracks/sessoes */
-.list-item{display:flex;align-items:center;padding:10px 14px;border-bottom:1px solid #111;gap:10px}
-.list-name{flex:1;font-size:12px;color:#bbb}
-.list-sub{font-size:10px;color:#444;margin-top:2px}
-.ibtn{height:26px;padding:0 10px;border:1px solid #2a2a2a;background:#111;color:#aaa;font-size:9px;border-radius:3px;flex-shrink:0}
+.list-item{display:flex;align-items:center;padding:10px 14px;border-bottom:1px solid #efefef;gap:10px;background:#ffffff}
+.list-name{flex:1;font-size:12px;color:#333}
+.list-sub{font-size:10px;color:#bbb;margin-top:2px}
+.ibtn{height:26px;padding:0 10px;border:1px solid #e0e0e0;background:#f8f8f8;color:#777;font-size:9px;border-radius:3px;flex-shrink:0}
 .ibtn:active{opacity:.6}
-.ibtn.g{border-color:#1e4025;background:#0a1a0d;color:#4caf50}
-.ibtn.r{border-color:#4a2020;background:#120808;color:#cf4444}
+.ibtn.g{border-color:#4caf50;background:#f1f8f1;color:#2e7d32}
+.ibtn.r{border-color:#ffcdd2;background:#fff5f5;color:#e53935}
 
 /* Status de operacao */
-#op-status{position:fixed;bottom:54px;left:50%;transform:translateX(-50%);background:#0d0d0d;border:1px solid #4caf50;border-radius:3px;padding:8px 20px;font-size:10px;color:#ccc;white-space:nowrap;display:none;z-index:99}
+#op-status{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#ffffff;border:1px solid #4caf50;border-radius:4px;padding:8px 20px;font-size:10px;color:#333;white-space:nowrap;display:none;z-index:99;box-shadow:0 2px 8px rgba(0,0,0,.12)}
+@media(min-width:600px){
+  #op-status{position:absolute;bottom:12px}
+}
+
+/* Mapa de pista */
+#trk-map{height:260px;background:#e8e8e8;border-top:1px solid #e0e0e0;border-bottom:1px solid #e0e0e0;position:relative;z-index:0}
+.map-btns{display:flex;gap:6px;padding:8px 14px;border-bottom:1px solid #efefef;flex-wrap:wrap;background:#ffffff}
+.mbtn{height:28px;padding:0 10px;border:1px solid #e0e0e0;background:#f8f8f8;color:#777;font-size:10px;border-radius:3px;white-space:nowrap}
+.mbtn:active{opacity:.6}
+.mbtn.finish{border-color:#4caf50;background:#f1f8f1;color:#2e7d32}
+.mbtn.s0{border-color:#90caf9;background:#e3f2fd;color:#1565c0}
+.mbtn.s1{border-color:#ffe082;background:#fffde7;color:#f57f17}
+.mbtn.pos{border-color:#e0e0e0;color:#888}
 </style>
 </head>
 <body>
+<div id="app">
 
 <!-- STATUS BAR -->
 <div id="sbar">
-  <div class="dot" id="ble-dot" style="background:#2a2a2a"></div>
+  <div class="dot" id="ble-dot" style="background:#ddd"></div>
   <span id="ble-name">desconectado</span>
   <div id="gps-row">
-    <div class="dot" id="gps-dot" style="background:#2a2a2a"></div>
+    <div class="dot" id="gps-dot" style="background:#ddd"></div>
     <span id="gps-txt">GPS --</span>
   </div>
   <button id="btn-disc" onclick="disconnect()">✕ desconectar</button>
@@ -139,8 +183,12 @@ button{cursor:pointer}
         <div id="delta-val">--.-</div>
       </div>
       <div id="btm">
-        <div><div id="lap-lbl">VOLTA</div><div id="lap-num">0</div></div>
+        <div id="lap-lbl">VOLTA</div><div id="lap-num">0</div>
       </div>
+      <div id="lap-hist-hdr">
+        <span>#</span><span>TEMPO</span><span>DELTA</span><span>VEL MAX</span>
+      </div>
+      <div id="lap-hist-rows"></div>
       <div id="coords"></div>
     </div>
 
@@ -195,18 +243,28 @@ button{cursor:pointer}
       <div class="row"><span class="row-lbl">Nome</span>
         <input class="finp" id="trk-name" type="text" maxlength="31" placeholder="nome da pista">
       </div>
-      <div class="row"><span class="row-lbl">Chegada marcada</span>
-        <span id="trk-finish" style="font-size:11px;color:#555">—</span>
+
+      <!-- Mapa -->
+      <div id="trk-map"></div>
+      <div class="map-btns">
+        <button class="mbtn pos"    onclick="mapMyPos()">📍 Minha pos.</button>
+        <button class="mbtn finish" onclick="mapMark('finish')">🏁 Chegada</button>
+        <button class="mbtn s0"     onclick="mapMark('s0')">① Setor 1</button>
+        <button class="mbtn s1"     onclick="mapMark('s1')">② Setor 2</button>
+      </div>
+
+      <div class="row"><span class="row-lbl">Chegada</span>
+        <span id="trk-finish" style="font-size:10px;color:#555">—</span>
       </div>
       <div class="row"><span class="row-lbl">Setor 1</span>
-        <span id="trk-s0" style="font-size:11px;color:#555">—</span>
+        <span id="trk-s0" style="font-size:10px;color:#555">—</span>
       </div>
       <div class="row"><span class="row-lbl">Setor 2</span>
-        <span id="trk-s1" style="font-size:11px;color:#555">—</span>
+        <span id="trk-s1" style="font-size:10px;color:#555">—</span>
       </div>
       <button class="abtn g" onclick="trkSave()">↑ Salvar pista no SD</button>
-      <button class="abtn r" onclick="trkClear()">Limpar campos</button>
-      <div class="fnote">Selecione uma pista da lista para editar, ou preencha o nome e salve uma nova.</div>
+      <button class="abtn r" onclick="trkClear()">Limpar pontos</button>
+      <div class="fnote">Use os botões para marcar pontos na sua posição GPS atual. Arraste os pins para ajustar. Heading é capturado automaticamente pelo dispositivo.</div>
     </div>
 
     <!-- ── SESSÕES ── -->
@@ -224,6 +282,7 @@ button{cursor:pointer}
 
 <div id="op-status"></div>
 
+</div><!-- #app -->
 <script>
 /* ── UUIDs ─────────────────────────────────────────────────────────── */
 const SVC_UUID  = 'a1b2c3d4-0001-4a5b-8c9d-0123456789ab';
@@ -242,6 +301,13 @@ let dev = null, chrCmd = null;
 let s_seq = 0;
 /* Mapa seq → {resolve, reject, chunks[]} para comandos em andamento */
 const pending = new Map();
+
+/* Histórico de voltas da sessão atual */
+let lapHistory = [];
+let _prevLapNum = 0;
+let _prevBestMs = 0;
+let _lapMaxSpd  = 0;   /* pico de velocidade na volta atual */
+let _frozenDelta = null; /* delta da última volta concluída (null = sem referência) */
 
 /* Pista em edição (campos do form) */
 let trkDraft = { finish:{is_set:false,lat:0,lon:0,heading:0},
@@ -418,20 +484,71 @@ function decodeTelemetry(buf) {
   };
 }
 
+/* ── Histórico de voltas ─────────────────────────────────────────────── */
+function renderLapHist() {
+  const hdr  = document.getElementById('lap-hist-hdr');
+  const rows = document.getElementById('lap-hist-rows');
+  if (!lapHistory.length) { hdr.style.display='none'; rows.innerHTML=''; return; }
+  hdr.style.display='grid';
+  /* índice da melhor volta */
+  let bestIdx=0;
+  lapHistory.forEach((l,i)=>{ if(l.ms<lapHistory[bestIdx].ms) bestIdx=i; });
+  rows.innerHTML = [...lapHistory].reverse().map(l => {
+    const isBest = lapHistory.indexOf(l)===bestIdx;
+    /* isBest pelo n (lap number) pois a cópia invertida mantém referência */
+    const ib = l.n === lapHistory[bestIdx].n;
+    const dSign = l.delta>0?'+':'';
+    const dStr  = l.n===1 ? '—' : dSign+(l.delta/1000).toFixed(3);
+    const dCls  = l.delta<0?'neg':l.delta>0?'pos':'';
+    return `<div class="lrow${ib?' best':''}">
+      <span class="ln">${ib?'★':l.n}</span>
+      <span class="lt">${fmt(l.ms)}</span>
+      <span class="ld ${dCls}">${dStr}</span>
+      <span class="lv">${l.vmax} km/h</span>
+    </div>`;
+  }).join('');
+}
+
 /* ── Atualização da UI de telemetria ─────────────────────────────────── */
 function updateTelem(p) {
+  /* Pico de velocidade na volta corrente */
+  if (p.speed > _lapMaxSpd) _lapMaxSpd = p.speed;
+
+  /* Detecta conclusão de volta (lap_num cresceu) */
+  if (p.lap_num > _prevLapNum && _prevLapNum > 0) {
+    /* Calcula delta correto:
+       O firmware faz delta = last - best APÓS atualizar best, então:
+       - novo recorde: delta_ms==0, best_ms caiu → delta real = new_best - old_best (negativo)
+       - mais lento:   delta_ms > 0                                                          */
+    let lapDelta;
+    if (_prevBestMs > 0 && p.best_ms < _prevBestMs) {
+      /* novo recorde: melhora em relação ao best anterior */
+      lapDelta = p.best_ms - _prevBestMs;  /* negativo */
+    } else {
+      lapDelta = p.delta_ms;               /* ≥ 0 */
+    }
+    _frozenDelta = lapDelta;
+
+    const lap_time_ms = lapDelta <= 0 ? p.best_ms : p.best_ms + lapDelta;
+    lapHistory.push({ n:_prevLapNum, ms:lap_time_ms, delta:lapDelta, vmax:Math.round(_lapMaxSpd) });
+    _lapMaxSpd = 0;
+    renderLapHist();
+  }
+  _prevLapNum = p.lap_num;
+  _prevBestMs = p.best_ms;
+
   document.getElementById('spd-val').textContent = Math.round(p.speed);
   document.getElementById('d-atual').textContent = fmt(p.lap_ms);
   document.getElementById('d-best').textContent  = p.best_ms ? fmt(p.best_ms) : '--.---';
   document.getElementById('lap-num').textContent = p.lap_num;
   const dv = document.getElementById('delta-val');
-  if (!p.best_ms || p.lap_num < 2) { dv.textContent='--.-'; dv.className=''; }
+  if (_frozenDelta === null) { dv.textContent='--.-'; dv.className=''; }
   else {
-    const sign = p.delta_ms > 0 ? '+' : '';
-    dv.textContent = sign + (p.delta_ms/1000).toFixed(3);
-    dv.className = p.delta_ms <= 0 ? 'ahead' : 'behind';
+    const sign = _frozenDelta > 0 ? '+' : '';
+    dv.textContent = sign + (_frozenDelta/1000).toFixed(3);
+    dv.className = _frozenDelta <= 0 ? 'ahead' : 'behind';
   }
-  document.getElementById('gps-dot').style.background = p.fix ? '#4caf50' : '#cf4444';
+  document.getElementById('gps-dot').style.background = p.fix ? '#4caf50' : '#ef9a9a';
   document.getElementById('gps-txt').textContent = 'GPS '+p.sats;
   if (p.fix) document.getElementById('coords').textContent =
     p.lat.toFixed(5)+'°  '+p.lon.toFixed(5)+'°';
@@ -441,6 +558,117 @@ function updateTelem(p) {
 function showTab(i) {
   document.querySelectorAll('.tb').forEach((b,j)=>b.classList.toggle('on',j===i));
   document.querySelectorAll('.page').forEach((p,j)=>p.classList.toggle('on',j===i));
+  if (i === 2) {
+    /* Inicializa mapa na primeira vez; sempre corrige tamanho */
+    if (!trkMap) mapInit();
+    else setTimeout(()=>trkMap.invalidateSize(), 50);
+  }
+}
+
+/* ── Mapa de pista (Leaflet) ─────────────────────────────────────────── */
+let trkMap = null;
+let mapDeviceHeading = 0;   /* bússola do celular, graus 0-360 */
+const mapMarkers = { finish: null, s0: null, s1: null };
+
+const mapColors = {
+  finish: { color:'#4caf50', label:'🏁' },
+  s0:     { color:'#3a6ad4', label:'①' },
+  s1:     { color:'#d4a03a', label:'②' },
+};
+
+function mapIcon(key) {
+  const c = mapColors[key];
+  return L.divIcon({
+    className: '',
+    html: `<div style="width:32px;height:32px;background:${c.color};border:2px solid #0a0a0a;border-radius:50% 50% 50% 0;transform:rotate(-45deg);display:flex;align-items:center;justify-content:center">
+             <span style="transform:rotate(45deg);font-size:13px;line-height:1">${c.label}</span></div>`,
+    iconSize: [32,32], iconAnchor:[16,32],
+  });
+}
+
+function mapInit() {
+  /* Começa no centro do Brasil; será recentrado ao pegar GPS */
+  trkMap = L.map('trk-map', { zoomControl:true, attributionControl:false })
+             .setView([-15.77, -47.93], 15);
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 20,
+  }).addTo(trkMap);
+
+  /* Restaura markers que já existiam no trkDraft */
+  ['finish','s0','s1'].forEach(k => {
+    const p = trkDraft[k==='finish'?'finish':k];
+    if (p && p.is_set) mapPlaceMarker(k, p.lat, p.lon, p.heading_deg||0);
+  });
+
+  /* Tenta centralizar no GPS do device imediatamente */
+  mapMyPos();
+
+  /* Captura bússola (iOS pede permissão) */
+  if (typeof DeviceOrientationEvent !== 'undefined' &&
+      typeof DeviceOrientationEvent.requestPermission === 'function') {
+    DeviceOrientationEvent.requestPermission().catch(()=>{});
+  }
+  window.addEventListener('deviceorientationabsolute', mapOrientation, true);
+  window.addEventListener('deviceorientation',         mapOrientation, true);
+
+  setTimeout(()=>trkMap.invalidateSize(), 100);
+}
+
+function mapOrientation(e) {
+  /* iOS: webkitCompassHeading (0=norte, CW). Android: 360-alpha */
+  if (e.webkitCompassHeading !== undefined) {
+    mapDeviceHeading = e.webkitCompassHeading;
+  } else if (e.absolute && e.alpha !== null) {
+    mapDeviceHeading = (360 - e.alpha) % 360;
+  }
+}
+
+function mapMyPos() {
+  if (!navigator.geolocation) { status('Geolocalização não suportada'); return; }
+  status('Buscando GPS...');
+  navigator.geolocation.getCurrentPosition(pos => {
+    const { latitude: lat, longitude: lon } = pos.coords;
+    if (trkMap) trkMap.setView([lat, lon], 19);
+    status('GPS ✓');
+  }, () => status('GPS indisponível'));
+}
+
+function mapMark(key) {
+  if (!navigator.geolocation) { status('GPS indisponível'); return; }
+  status('Marcando...');
+  navigator.geolocation.getCurrentPosition(pos => {
+    const lat = pos.coords.latitude;
+    const lon = pos.coords.longitude;
+    const hdg = mapDeviceHeading;
+    mapPlaceMarker(key, lat, lon, hdg);
+    if (trkMap) trkMap.setView([lat, lon], 19);
+    status(mapColors[key].label + ' marcado ✓');
+  }, () => status('GPS indisponível'));
+}
+
+function mapPlaceMarker(key, lat, lon, hdg) {
+  if (mapMarkers[key]) mapMarkers[key].remove();
+
+  const m = L.marker([lat, lon], {
+    icon:      mapIcon(key),
+    draggable: true,
+    title:     key,
+  }).addTo(trkMap);
+
+  m.on('dragend', () => {
+    const p = m.getLatLng();
+    mapUpdateDraft(key, p.lat, p.lng, mapDeviceHeading);
+  });
+
+  mapMarkers[key] = m;
+  mapUpdateDraft(key, lat, lon, hdg);
+}
+
+function mapUpdateDraft(key, lat, lon, hdg) {
+  const field = key === 'finish' ? 'finish' : key;
+  trkDraft[field] = { is_set:true, lat, lon, heading: hdg };
+  updTrkForm();
 }
 
 /* ── Conexão BLE ─────────────────────────────────────────────────────── */
@@ -492,6 +720,8 @@ async function doConnect() {
 
 function onDisconn() {
   setBle(false);
+  lapHistory=[]; _prevLapNum=0; _prevBestMs=0; _lapMaxSpd=0; _frozenDelta=null;
+  renderLapHist();
   document.getElementById('conn-screen').style.display = 'flex';
   document.getElementById('main').style.display = 'none';
   document.getElementById('gps-row').style.display = 'none';
@@ -500,9 +730,9 @@ function onDisconn() {
 }
 async function disconnect() { if (dev?.gatt?.connected) dev.gatt.disconnect(); }
 function setBle(ok, name) {
-  document.getElementById('ble-dot').style.background = ok ? '#3a6ad4' : '#2a2a2a';
+  document.getElementById('ble-dot').style.background = ok ? '#1976d2' : '#ddd';
   document.getElementById('ble-name').textContent     = ok ? (name||'KartBox') : 'desconectado';
-  document.getElementById('ble-name').style.color     = ok ? '#3a6ad4' : '#555';
+  document.getElementById('ble-name').style.color     = ok ? '#1976d2' : '#999';
   document.getElementById('btn-disc').style.display   = ok ? 'block' : 'none';
 }
 
@@ -563,27 +793,46 @@ async function trkEdit(name) {
     const enc  = new TextEncoder();
     const data = await sendCmd(CMD.GET_TRACK, enc.encode(name));
     const trk  = decodeTrack(data);
-    trkDraft   = { finish:trk.finish, s0:trk.s0, s1:trk.s1 };
+    /* Normaliza campo heading: decodeTrack retorna .heading, mapUpdateDraft também usa .heading */
+    trkDraft = {
+      finish: { ...trk.finish, heading: trk.finish.heading },
+      s0:     { ...trk.s0,     heading: trk.s0.heading },
+      s1:     { ...trk.s1,     heading: trk.s1.heading },
+    };
     document.getElementById('trk-name').value = trk.name;
-    updTrkForm();
-    showTab(2);
+    showTab(2);   /* abre aba (inicializa mapa se necessário) */
+    /* Planta markers após mapa estar pronto */
+    setTimeout(() => {
+      ['finish','s0','s1'].forEach(k => {
+        const p = trkDraft[k];
+        if (p && p.is_set) mapPlaceMarker(k, p.lat, p.lon, p.heading||0);
+      });
+      /* Centraliza no ponto de chegada */
+      if (trkDraft.finish.is_set)
+        trkMap.setView([trkDraft.finish.lat, trkDraft.finish.lon], 18);
+      updTrkForm();
+    }, 200);
     status('Pista carregada: '+name);
   } catch(e) { status('Erro: '+e.message); }
 }
 
 function updTrkForm() {
-  const f = trkDraft.finish;
-  document.getElementById('trk-finish').textContent =
-    f.is_set ? `${f.lat.toFixed(5)}, ${f.lon.toFixed(5)}` : '—';
-  document.getElementById('trk-finish').style.color = f.is_set ? '#4caf50' : '#555';
-  const s0 = trkDraft.s0;
-  document.getElementById('trk-s0').textContent =
-    s0.is_set ? `${s0.lat.toFixed(5)}, ${s0.lon.toFixed(5)}` : '—';
-  document.getElementById('trk-s0').style.color = s0.is_set ? '#4caf50' : '#555';
-  const s1 = trkDraft.s1;
-  document.getElementById('trk-s1').textContent =
-    s1.is_set ? `${s1.lat.toFixed(5)}, ${s1.lon.toFixed(5)}` : '—';
-  document.getElementById('trk-s1').style.color = s1.is_set ? '#4caf50' : '#555';
+  const rows = [
+    { key:'finish', el:'trk-finish', color:'#4caf50' },
+    { key:'s0',     el:'trk-s0',     color:'#3a6ad4' },
+    { key:'s1',     el:'trk-s1',     color:'#d4a03a' },
+  ];
+  rows.forEach(({ key, el, color }) => {
+    const p = trkDraft[key];
+    const span = document.getElementById(el);
+    if (p && p.is_set) {
+      span.textContent = `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}  hdg ${Math.round(p.heading||0)}°`;
+      span.style.color = color;
+    } else {
+      span.textContent = '—';
+      span.style.color = '#555';
+    }
+  });
 }
 
 async function trkSave() {
@@ -614,6 +863,10 @@ function trkClear() {
   trkDraft = { finish:{is_set:false,lat:0,lon:0,heading:0},
                s0:{is_set:false,lat:0,lon:0,heading:0},
                s1:{is_set:false,lat:0,lon:0,heading:0} };
+  /* Remove markers do mapa */
+  Object.keys(mapMarkers).forEach(k => {
+    if (mapMarkers[k]) { mapMarkers[k].remove(); mapMarkers[k]=null; }
+  });
   updTrkForm();
 }
 
