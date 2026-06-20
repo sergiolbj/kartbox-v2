@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0a0a0a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>KartBox Telemetria</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+html, body { height: 100%; background: #0a0a0a; color: #e0e0e0; font-family: 'Courier New', monospace; overflow: hidden; }
+body { display: flex; flex-direction: column; }
+button { -webkit-appearance: none; appearance: none; font-family: 'Courier New', monospace; cursor: pointer; }
+
+/* ── STATUS BAR ─────────────────────────────────────────── */
+#sbar {
+  height: 44px; background: #070707; border-bottom: 1px solid #181818;
+  display: flex; align-items: center; padding: 0 14px; gap: 10px; flex-shrink: 0;
+}
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+#ble-name { font-size: 11px; color: #555; flex: 1; }
+#gps-row  { font-size: 10px; color: #555; display: none; align-items: center; gap: 5px; }
+#btn-disc {
+  padding: 5px 11px; border: 1px solid #3a1818; background: #100808;
+  color: #cf4444; font-size: 10px; border-radius: 3px; display: none;
+}
+#btn-disc:active { opacity: .6; }
+
+/* ── CONNECT SCREEN ─────────────────────────────────────── */
+#conn-screen {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 28px; padding: 32px;
+}
+#btn-conn {
+  width: 100%; max-width: 280px; padding: 15px;
+  border: 1px solid #1e4025; background: #0a1a0d; color: #4caf50;
+  font-size: 14px; border-radius: 4px; letter-spacing: 1.5px;
+}
+#btn-conn:disabled { opacity: .4; cursor: default; }
+#btn-conn:not(:disabled):active { opacity: .6; }
+#err { font-size: 11px; color: #cf4444; text-align: center; min-height: 16px; }
+.hint { font-size: 11px; color: #2e2e2e; text-align: center; line-height: 1.8; }
+
+/* ── DASHBOARD ──────────────────────────────────────────── */
+#dash { flex: 1; display: none; flex-direction: column; }
+
+/* Speed */
+#spd-sec {
+  flex: 0 0 auto; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 14px 0 8px; border-bottom: 1px solid #181818;
+}
+#spd-val { font-size: 100px; font-weight: bold; color: #f0f0f0; line-height: 1; letter-spacing: -6px; }
+#spd-unit { font-size: 12px; color: #3a3a3a; letter-spacing: 3px; margin-top: 2px; }
+
+/* Times */
+#times { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid #181818; }
+.tblk { padding: 12px 16px; border-right: 1px solid #181818; }
+.tblk:last-child { border-right: none; }
+.tlbl { font-size: 9px; color: #303030; letter-spacing: 1px; text-transform: uppercase; }
+.tval { font-size: 22px; font-weight: bold; color: #bbb; letter-spacing: -1px; margin-top: 4px; }
+.tval.green { color: #4caf50; }
+
+/* Delta */
+#delta-sec { padding: 10px 16px; border-bottom: 1px solid #181818; text-align: center; }
+#delta-lbl { font-size: 9px; color: #282828; letter-spacing: 1px; }
+#delta-val { font-size: 40px; font-weight: bold; color: #555; letter-spacing: -2px; margin-top: 2px; }
+#delta-val.ahead { color: #4caf50; }
+#delta-val.behind { color: #cf4444; }
+
+/* Bottom */
+#bottom { display: flex; padding: 10px 16px; align-items: center; gap: 16px; }
+#lap-wrap { flex-shrink: 0; }
+#lap-lbl { font-size: 9px; color: #282828; letter-spacing: 1px; }
+#lap-num { font-size: 24px; font-weight: bold; color: #999; }
+#secs { flex: 1; text-align: right; font-size: 11px; color: #444; line-height: 2; }
+
+/* Coords (small, bottom) */
+#coords {
+  font-size: 10px; color: #222; text-align: center;
+  padding: 4px 0 8px; letter-spacing: .3px; flex-shrink: 0;
+}
+</style>
+</head>
+<body>
+
+<!-- STATUS BAR -->
+<div id="sbar">
+  <div class="dot" id="ble-dot" style="background:#2a2a2a"></div>
+  <span id="ble-name">desconectado</span>
+  <div id="gps-row">
+    <div class="dot" id="gps-dot" style="background:#2a2a2a"></div>
+    <span id="gps-txt">GPS --</span>
+  </div>
+  <button id="btn-disc" onclick="disconnect()">✕ desconectar</button>
+</div>
+
+<!-- CONNECT -->
+<div id="conn-screen">
+  <div style="text-align:center">
+    <div style="font-size:30px;font-weight:bold;color:#4caf50;letter-spacing:3px">KARTBOX</div>
+    <div style="font-size:10px;color:#2a2a2a;letter-spacing:2px;margin-top:4px">TELEMETRIA BLE</div>
+  </div>
+  <button id="btn-conn" onclick="doConnect()">CONECTAR</button>
+  <div id="err"></div>
+  <div class="hint">
+    Requer <strong style="color:#555">Chrome no Android</strong> (ou desktop)<br>
+    com Bluetooth ativado.<br>
+    KartBox deve estar ligado e anunciando.
+  </div>
+</div>
+
+<!-- DASHBOARD -->
+<div id="dash">
+  <div id="spd-sec">
+    <div id="spd-val">0</div>
+    <div id="spd-unit">KM / H</div>
+  </div>
+  <div id="times">
+    <div class="tblk">
+      <div class="tlbl">ATUAL</div>
+      <div class="tval" id="d-atual">--.---</div>
+    </div>
+    <div class="tblk">
+      <div class="tlbl">MELHOR</div>
+      <div class="tval green" id="d-best">--.---</div>
+    </div>
+  </div>
+  <div id="delta-sec">
+    <div id="delta-lbl">DELTA</div>
+    <div id="delta-val">--.-</div>
+  </div>
+  <div id="bottom">
+    <div id="lap-wrap">
+      <div id="lap-lbl">VOLTA</div>
+      <div id="lap-num">0</div>
+    </div>
+    <div id="secs"></div>
+  </div>
+  <div id="coords"></div>
+</div>
+
+<script>
+/* ── UUIDs (little-endian → string) ──────────────────────
+   BLE_UUID128_INIT bytes reversed:
+   a1b2c3d4-0001-4a5b-8c9d-0123456789ab  (service)
+   a1b2c3d4-0002-4a5b-8c9d-0123456789ab  (characteristic)
+*/
+const SVC = 'a1b2c3d4-0001-4a5b-8c9d-0123456789ab';
+const CHR = 'a1b2c3d4-0002-4a5b-8c9d-0123456789ab';
+
+let dev = null;
+
+/* Formata ms → "s.mmm" */
+function fmt(ms) {
+  if (!ms) return '--.---';
+  const s = Math.floor(ms / 1000);
+  const m = ms % 1000;
+  return s + '.' + String(m).padStart(3, '0');
+}
+
+/* Decodifica pacote binário de 28 bytes (little-endian) */
+function decode(buf) {
+  const v = new DataView(buf);
+  return {
+    lap_ms:   v.getUint32(0,  true),
+    delta_ms: v.getInt32(4,   true),
+    best_ms:  v.getUint32(8,  true),
+    speed:    v.getUint16(12, true) / 10,
+    heading:  v.getUint16(14, true) / 10,
+    lap_num:  v.getUint16(16, true),
+    sats:     v.getUint8(18),
+    fix:      v.getUint8(19),
+    lat:      v.getInt32(20, true) / 1e6,
+    lon:      v.getInt32(24, true) / 1e6,
+  };
+}
+
+function updateUI(p) {
+  /* Velocidade */
+  document.getElementById('spd-val').textContent = Math.round(p.speed);
+
+  /* Tempos */
+  document.getElementById('d-atual').textContent = fmt(p.lap_ms);
+  document.getElementById('d-best').textContent  = p.best_ms ? fmt(p.best_ms) : '--.---';
+
+  /* Volta */
+  document.getElementById('lap-num').textContent = p.lap_num;
+
+  /* Delta */
+  const dEl = document.getElementById('delta-val');
+  if (!p.best_ms || p.lap_num < 2) {
+    dEl.textContent = '--.-';
+    dEl.className = '';
+  } else {
+    const sign = p.delta_ms > 0 ? '+' : '';
+    dEl.textContent = sign + (p.delta_ms / 1000).toFixed(3);
+    dEl.className = p.delta_ms <= 0 ? 'ahead' : 'behind';
+  }
+
+  /* GPS */
+  document.getElementById('gps-dot').style.background = p.fix ? '#4caf50' : '#cf4444';
+  document.getElementById('gps-txt').textContent = 'GPS ' + p.sats;
+
+  /* Coordenadas */
+  if (p.fix) {
+    document.getElementById('coords').textContent =
+      p.lat.toFixed(5) + '°  ' + p.lon.toFixed(5) + '°';
+  }
+}
+
+async function doConnect() {
+  const errEl = document.getElementById('err');
+  const btn   = document.getElementById('btn-conn');
+  errEl.textContent = '';
+
+  if (!navigator.bluetooth) {
+    errEl.textContent = 'Web Bluetooth não suportado. Use Chrome no Android.';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'aguardando...';
+
+  try {
+    dev = await navigator.bluetooth.requestDevice({
+      filters: [{ name: 'KartBox' }],
+      optionalServices: [SVC]
+    });
+    dev.addEventListener('gattserverdisconnected', onDisconn);
+
+    btn.textContent = 'conectando...';
+    const server  = await dev.gatt.connect();
+    const service = await server.getPrimaryService(SVC);
+    const chr     = await service.getCharacteristic(CHR);
+
+    chr.addEventListener('characteristicvaluechanged', e =>
+      updateUI(decode(e.target.value.buffer))
+    );
+    await chr.startNotifications();
+
+    /* Lê valor inicial */
+    const init = await chr.readValue();
+    updateUI(decode(init.buffer));
+
+    setBle(true, dev.name);
+    document.getElementById('conn-screen').style.display = 'none';
+    document.getElementById('dash').style.display = 'flex';
+    document.getElementById('gps-row').style.display = 'flex';
+
+  } catch (e) {
+    errEl.textContent = e.message || 'Falha ao conectar.';
+    btn.disabled = false;
+    btn.textContent = 'CONECTAR';
+  }
+}
+
+function onDisconn() {
+  setBle(false);
+  document.getElementById('conn-screen').style.display = 'flex';
+  document.getElementById('dash').style.display = 'none';
+  document.getElementById('gps-row').style.display = 'none';
+  const btn = document.getElementById('btn-conn');
+  btn.disabled = false;
+  btn.textContent = 'CONECTAR';
+}
+
+async function disconnect() {
+  if (dev && dev.gatt.connected) dev.gatt.disconnect();
+}
+
+function setBle(ok, name) {
+  document.getElementById('ble-dot').style.background  = ok ? '#3a6ad4' : '#2a2a2a';
+  document.getElementById('ble-name').textContent       = ok ? (name || 'KartBox') : 'desconectado';
+  document.getElementById('ble-name').style.color       = ok ? '#3a6ad4' : '#555';
+  document.getElementById('btn-disc').style.display     = ok ? 'block' : 'none';
+}
+</script>
+</body>
+</html>
