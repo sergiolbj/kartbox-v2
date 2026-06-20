@@ -6,81 +6,85 @@
 <meta name="theme-color" content="#0a0a0a">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>KartBox Telemetria</title>
+<title>KartBox</title>
 <style>
-* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-html, body { height: 100%; background: #0a0a0a; color: #e0e0e0; font-family: 'Courier New', monospace; overflow: hidden; }
-body { display: flex; flex-direction: column; }
-button { -webkit-appearance: none; appearance: none; font-family: 'Courier New', monospace; cursor: pointer; }
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;background:#0a0a0a;color:#e0e0e0;font-family:'Courier New',monospace;overflow:hidden}
+body{display:flex;flex-direction:column}
+button,input,select{-webkit-appearance:none;appearance:none;font-family:'Courier New',monospace}
+button{cursor:pointer}
 
-/* ── STATUS BAR ─────────────────────────────────────────── */
-#sbar {
-  height: 44px; background: #070707; border-bottom: 1px solid #181818;
-  display: flex; align-items: center; padding: 0 14px; gap: 10px; flex-shrink: 0;
-}
-.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
-#ble-name { font-size: 11px; color: #555; flex: 1; }
-#gps-row  { font-size: 10px; color: #555; display: none; align-items: center; gap: 5px; }
-#btn-disc {
-  padding: 5px 11px; border: 1px solid #3a1818; background: #100808;
-  color: #cf4444; font-size: 10px; border-radius: 3px; display: none;
-}
-#btn-disc:active { opacity: .6; }
+/* STATUS BAR */
+#sbar{height:44px;background:#070707;border-bottom:1px solid #181818;display:flex;align-items:center;padding:0 14px;gap:10px;flex-shrink:0}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex-shrink:0}
+#ble-name{font-size:11px;color:#555;flex:1}
+#gps-row{font-size:10px;color:#555;display:none;align-items:center;gap:5px}
+#btn-disc{padding:5px 11px;border:1px solid #3a1818;background:#100808;color:#cf4444;font-size:10px;border-radius:3px;display:none}
+#btn-disc:active{opacity:.6}
 
-/* ── CONNECT SCREEN ─────────────────────────────────────── */
-#conn-screen {
-  flex: 1; display: flex; flex-direction: column;
-  align-items: center; justify-content: center; gap: 28px; padding: 32px;
-}
-#btn-conn {
-  width: 100%; max-width: 280px; padding: 15px;
-  border: 1px solid #1e4025; background: #0a1a0d; color: #4caf50;
-  font-size: 14px; border-radius: 4px; letter-spacing: 1.5px;
-}
-#btn-conn:disabled { opacity: .4; cursor: default; }
-#btn-conn:not(:disabled):active { opacity: .6; }
-#err { font-size: 11px; color: #cf4444; text-align: center; min-height: 16px; }
-.hint { font-size: 11px; color: #2e2e2e; text-align: center; line-height: 1.8; }
+/* CONNECT */
+#conn-screen{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:28px;padding:32px}
+#btn-conn{width:100%;max-width:280px;padding:15px;border:1px solid #1e4025;background:#0a1a0d;color:#4caf50;font-size:14px;border-radius:4px;letter-spacing:1.5px}
+#btn-conn:disabled{opacity:.4}
+#btn-conn:not(:disabled):active{opacity:.6}
+#conn-err{font-size:11px;color:#cf4444;text-align:center;min-height:16px}
+.hint{font-size:11px;color:#2a2a2a;text-align:center;line-height:1.9}
 
-/* ── DASHBOARD ──────────────────────────────────────────── */
-#dash { flex: 1; display: none; flex-direction: column; }
+/* MAIN (tabs) */
+#main{flex:1;display:none;flex-direction:column;overflow:hidden}
+#tabbar{height:44px;background:#070707;border-bottom:1px solid #181818;display:flex;flex-shrink:0}
+.tb{flex:1;background:transparent;border:none;border-bottom:2px solid transparent;color:#2e2e2e;font-size:10px;font-weight:bold;letter-spacing:.5px}
+.tb.on{color:#4caf50;border-bottom-color:#4caf50}
+#pages{flex:1;position:relative;overflow:hidden}
+.page{position:absolute;inset:0;overflow-y:auto;display:none}
+.page.on{display:block}
 
-/* Speed */
-#spd-sec {
-  flex: 0 0 auto; display: flex; flex-direction: column;
-  align-items: center; justify-content: center;
-  padding: 14px 0 8px; border-bottom: 1px solid #181818;
-}
-#spd-val { font-size: 100px; font-weight: bold; color: #f0f0f0; line-height: 1; letter-spacing: -6px; }
-#spd-unit { font-size: 12px; color: #3a3a3a; letter-spacing: 3px; margin-top: 2px; }
+/* ── TELEMETRIA ── */
+#spd-sec{display:flex;flex-direction:column;align-items:center;padding:14px 0 8px;border-bottom:1px solid #181818}
+#spd-val{font-size:100px;font-weight:bold;color:#f0f0f0;line-height:1;letter-spacing:-6px}
+#spd-unit{font-size:12px;color:#333;letter-spacing:3px;margin-top:2px}
+#times{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #181818}
+.tblk{padding:12px 16px;border-right:1px solid #181818}
+.tblk:last-child{border-right:none}
+.tlbl{font-size:9px;color:#282828;letter-spacing:1px;text-transform:uppercase}
+.tval{font-size:22px;font-weight:bold;color:#bbb;letter-spacing:-1px;margin-top:4px}
+.tval.green{color:#4caf50}
+#delta-sec{padding:10px 16px;border-bottom:1px solid #181818;text-align:center}
+#delta-lbl{font-size:9px;color:#222;letter-spacing:1px}
+#delta-val{font-size:40px;font-weight:bold;color:#444;letter-spacing:-2px;margin-top:2px}
+#delta-val.ahead{color:#4caf50}
+#delta-val.behind{color:#cf4444}
+#btm{display:flex;padding:10px 16px;align-items:center;gap:16px}
+#lap-lbl{font-size:9px;color:#282828;letter-spacing:1px}
+#lap-num{font-size:24px;font-weight:bold;color:#888}
+#coords{font-size:10px;color:#1e1e1e;text-align:center;padding:4px 0 8px;letter-spacing:.3px}
 
-/* Times */
-#times { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid #181818; }
-.tblk { padding: 12px 16px; border-right: 1px solid #181818; }
-.tblk:last-child { border-right: none; }
-.tlbl { font-size: 9px; color: #303030; letter-spacing: 1px; text-transform: uppercase; }
-.tval { font-size: 22px; font-weight: bold; color: #bbb; letter-spacing: -1px; margin-top: 4px; }
-.tval.green { color: #4caf50; }
+/* ── FORM (config + outras abas) ── */
+.section{padding:10px 14px 4px;font-size:9px;color:#2e2e2e;letter-spacing:1px;text-transform:uppercase}
+.row{display:flex;align-items:center;min-height:44px;padding:0 14px;border-bottom:1px solid #111}
+.row-lbl{font-size:11px;color:#666;flex:1}
+.finp{height:30px;background:#111;border:1px solid #252525;color:#ccc;font-size:11px;padding:0 8px;border-radius:3px;width:160px;outline:none}
+.finp:focus{border-color:#3a3a3a}
+.fsel{height:30px;background:#111;border:1px solid #252525;color:#ccc;font-size:11px;padding:0 6px;border-radius:3px;width:160px;outline:none}
+.fnote{font-size:10px;color:#333;padding:4px 14px 8px;line-height:1.6}
 
-/* Delta */
-#delta-sec { padding: 10px 16px; border-bottom: 1px solid #181818; text-align: center; }
-#delta-lbl { font-size: 9px; color: #282828; letter-spacing: 1px; }
-#delta-val { font-size: 40px; font-weight: bold; color: #555; letter-spacing: -2px; margin-top: 2px; }
-#delta-val.ahead { color: #4caf50; }
-#delta-val.behind { color: #cf4444; }
+/* Botões de ação */
+.abtn{display:block;margin:8px 14px;padding:10px;border:1px solid #2e2e2e;background:#141414;color:#ccc;font-size:11px;border-radius:3px;text-align:center;width:calc(100% - 28px);letter-spacing:.3px}
+.abtn:active{opacity:.6}
+.abtn.g{border-color:#1e4025;background:#0a1a0d;color:#4caf50}
+.abtn.r{border-color:#4a2020;background:#120808;color:#cf4444}
 
-/* Bottom */
-#bottom { display: flex; padding: 10px 16px; align-items: center; gap: 16px; }
-#lap-wrap { flex-shrink: 0; }
-#lap-lbl { font-size: 9px; color: #282828; letter-spacing: 1px; }
-#lap-num { font-size: 24px; font-weight: bold; color: #999; }
-#secs { flex: 1; text-align: right; font-size: 11px; color: #444; line-height: 2; }
+/* Lista de tracks/sessoes */
+.list-item{display:flex;align-items:center;padding:10px 14px;border-bottom:1px solid #111;gap:10px}
+.list-name{flex:1;font-size:12px;color:#bbb}
+.list-sub{font-size:10px;color:#444;margin-top:2px}
+.ibtn{height:26px;padding:0 10px;border:1px solid #2a2a2a;background:#111;color:#aaa;font-size:9px;border-radius:3px;flex-shrink:0}
+.ibtn:active{opacity:.6}
+.ibtn.g{border-color:#1e4025;background:#0a1a0d;color:#4caf50}
+.ibtn.r{border-color:#4a2020;background:#120808;color:#cf4444}
 
-/* Coords (small, bottom) */
-#coords {
-  font-size: 10px; color: #222; text-align: center;
-  padding: 4px 0 8px; letter-spacing: .3px; flex-shrink: 0;
-}
+/* Status de operacao */
+#op-status{position:fixed;bottom:54px;left:50%;transform:translateX(-50%);background:#0d0d0d;border:1px solid #4caf50;border-radius:3px;padding:8px 20px;font-size:10px;color:#ccc;white-space:nowrap;display:none;z-index:99}
 </style>
 </head>
 <body>
@@ -100,181 +104,563 @@ button { -webkit-appearance: none; appearance: none; font-family: 'Courier New',
 <div id="conn-screen">
   <div style="text-align:center">
     <div style="font-size:30px;font-weight:bold;color:#4caf50;letter-spacing:3px">KARTBOX</div>
-    <div style="font-size:10px;color:#2a2a2a;letter-spacing:2px;margin-top:4px">TELEMETRIA BLE</div>
+    <div style="font-size:10px;color:#282828;letter-spacing:2px;margin-top:4px">CONTROLE BLE</div>
   </div>
   <button id="btn-conn" onclick="doConnect()">CONECTAR</button>
-  <div id="err"></div>
+  <div id="conn-err"></div>
   <div class="hint">
-    Requer <strong style="color:#555">Chrome no Android</strong> (ou desktop)<br>
-    com Bluetooth ativado.<br>
-    KartBox deve estar ligado e anunciando.
+    Chrome Android · Bluetooth ativado<br>
+    KartBox ligado e anunciando
   </div>
 </div>
 
-<!-- DASHBOARD -->
-<div id="dash">
-  <div id="spd-sec">
-    <div id="spd-val">0</div>
-    <div id="spd-unit">KM / H</div>
+<!-- MAIN -->
+<div id="main">
+  <div id="tabbar">
+    <button class="tb on" onclick="showTab(0)">TELEM</button>
+    <button class="tb"    onclick="showTab(1)">CONFIG</button>
+    <button class="tb"    onclick="showTab(2)">PISTAS</button>
+    <button class="tb"    onclick="showTab(3)">SESSÕES</button>
   </div>
-  <div id="times">
-    <div class="tblk">
-      <div class="tlbl">ATUAL</div>
-      <div class="tval" id="d-atual">--.---</div>
+  <div id="pages">
+
+    <!-- ── TELEMETRIA ── -->
+    <div class="page on" id="p0">
+      <div id="spd-sec">
+        <div id="spd-val">0</div>
+        <div id="spd-unit">KM / H</div>
+      </div>
+      <div id="times">
+        <div class="tblk"><div class="tlbl">ATUAL</div><div class="tval" id="d-atual">--.---</div></div>
+        <div class="tblk"><div class="tlbl">MELHOR</div><div class="tval green" id="d-best">--.---</div></div>
+      </div>
+      <div id="delta-sec">
+        <div id="delta-lbl">DELTA</div>
+        <div id="delta-val">--.-</div>
+      </div>
+      <div id="btm">
+        <div><div id="lap-lbl">VOLTA</div><div id="lap-num">0</div></div>
+      </div>
+      <div id="coords"></div>
     </div>
-    <div class="tblk">
-      <div class="tlbl">MELHOR</div>
-      <div class="tval green" id="d-best">--.---</div>
+
+    <!-- ── CONFIG ── -->
+    <div class="page" id="p1">
+      <div class="section">Configurações do dispositivo</div>
+
+      <div class="row"><span class="row-lbl">Fuso horário</span>
+        <select class="fsel" id="cfg-utc">
+          <option value="-720">UTC-12:00</option><option value="-660">UTC-11:00</option>
+          <option value="-600">UTC-10:00</option><option value="-540">UTC-09:00</option>
+          <option value="-480">UTC-08:00</option><option value="-420">UTC-07:00</option>
+          <option value="-360">UTC-06:00</option><option value="-300">UTC-05:00</option>
+          <option value="-240">UTC-04:00</option><option value="-180" selected>UTC-03:00</option>
+          <option value="-120">UTC-02:00</option><option value="-60">UTC-01:00</option>
+          <option value="0">UTC+00:00</option><option value="60">UTC+01:00</option>
+          <option value="120">UTC+02:00</option><option value="180">UTC+03:00</option>
+          <option value="240">UTC+04:00</option><option value="300">UTC+05:00</option>
+          <option value="360">UTC+06:00</option><option value="420">UTC+07:00</option>
+          <option value="480">UTC+08:00</option><option value="540">UTC+09:00</option>
+          <option value="600">UTC+10:00</option><option value="660">UTC+11:00</option>
+          <option value="720">UTC+12:00</option>
+        </select>
+      </div>
+      <div class="row"><span class="row-lbl">Raio do gate (m)</span>
+        <input class="finp" id="cfg-gate" type="number" min="3" max="30" value="15" style="width:90px">
+      </div>
+      <div class="row"><span class="row-lbl">Tempo mín. volta (s)</span>
+        <input class="finp" id="cfg-minlap" type="number" min="5" max="300" value="10" style="width:90px">
+      </div>
+      <div class="row"><span class="row-lbl">Nome BLE</span>
+        <input class="finp" id="cfg-blename" type="text" maxlength="31" value="KartBox">
+      </div>
+      <div class="row"><span class="row-lbl">Senha WiFi</span>
+        <input class="finp" id="cfg-wifipass" type="password" maxlength="31">
+      </div>
+
+      <button class="abtn g" onclick="cfgLoad()">↓ Ler do dispositivo</button>
+      <button class="abtn"   onclick="cfgSave()">↑ Salvar no dispositivo</button>
+      <div class="fnote">Alterações são aplicadas imediatamente e persistem em NVS.</div>
     </div>
-  </div>
-  <div id="delta-sec">
-    <div id="delta-lbl">DELTA</div>
-    <div id="delta-val">--.-</div>
-  </div>
-  <div id="bottom">
-    <div id="lap-wrap">
-      <div id="lap-lbl">VOLTA</div>
-      <div id="lap-num">0</div>
+
+    <!-- ── PISTAS ── -->
+    <div class="page" id="p2">
+      <div style="display:flex;align-items:center;padding:8px 14px;border-bottom:1px solid #181818;gap:8px">
+        <span style="font-size:10px;color:#444;flex:1">pistas salvas no SD</span>
+        <button class="ibtn g" onclick="trackLoad()">↓ atualizar</button>
+      </div>
+      <div id="track-list"><div style="padding:24px;font-size:11px;color:#2a2a2a;text-align:center">carregando...</div></div>
+
+      <div class="section" style="margin-top:8px">Nova / editar pista</div>
+      <div class="row"><span class="row-lbl">Nome</span>
+        <input class="finp" id="trk-name" type="text" maxlength="31" placeholder="nome da pista">
+      </div>
+      <div class="row"><span class="row-lbl">Chegada marcada</span>
+        <span id="trk-finish" style="font-size:11px;color:#555">—</span>
+      </div>
+      <div class="row"><span class="row-lbl">Setor 1</span>
+        <span id="trk-s0" style="font-size:11px;color:#555">—</span>
+      </div>
+      <div class="row"><span class="row-lbl">Setor 2</span>
+        <span id="trk-s1" style="font-size:11px;color:#555">—</span>
+      </div>
+      <button class="abtn g" onclick="trkSave()">↑ Salvar pista no SD</button>
+      <button class="abtn r" onclick="trkClear()">Limpar campos</button>
+      <div class="fnote">Selecione uma pista da lista para editar, ou preencha o nome e salve uma nova.</div>
     </div>
-    <div id="secs"></div>
+
+    <!-- ── SESSÕES ── -->
+    <div class="page" id="p3">
+      <div style="display:flex;align-items:center;padding:8px 14px;border-bottom:1px solid #181818;gap:8px">
+        <span style="font-size:10px;color:#444;flex:1">sessões gravadas no SD</span>
+        <button class="ibtn g" onclick="sessLoad()">↓ atualizar</button>
+      </div>
+      <div id="sess-list"><div style="padding:24px;font-size:11px;color:#2a2a2a;text-align:center">carregando...</div></div>
+      <button class="abtn r" onclick="sessDelAll()" style="margin-top:8px">Apagar todas as sessões</button>
+    </div>
+
   </div>
-  <div id="coords"></div>
 </div>
+
+<div id="op-status"></div>
 
 <script>
-/* ── UUIDs (little-endian → string) ──────────────────────
-   BLE_UUID128_INIT bytes reversed:
-   a1b2c3d4-0001-4a5b-8c9d-0123456789ab  (service)
-   a1b2c3d4-0002-4a5b-8c9d-0123456789ab  (characteristic)
-*/
-const SVC = 'a1b2c3d4-0001-4a5b-8c9d-0123456789ab';
-const CHR = 'a1b2c3d4-0002-4a5b-8c9d-0123456789ab';
+/* ── UUIDs ─────────────────────────────────────────────────────────── */
+const SVC_UUID  = 'a1b2c3d4-0001-4a5b-8c9d-0123456789ab';
+const CHR_TELEM = 'a1b2c3d4-0001-4a5b-8c9d-0123456789ab';
+const CHR_CMD   = 'a1b2c3d4-0003-4a5b-8c9d-0123456789ab';
+const CHR_RSP   = 'a1b2c3d4-0004-4a5b-8c9d-0123456789ab';
 
-let dev = null;
+/* ── Códigos de comando / status ────────────────────────────────────── */
+const CMD = { GET_SETTINGS:0x01, SET_SETTINGS:0x02, LIST_TRACKS:0x03,
+              GET_TRACK:0x04, PUT_TRACK:0x05, DEL_TRACK:0x06,
+              LIST_SESSIONS:0x10, GET_SESSION:0x11, DEL_ALL_SESSIONS:0x12 };
+const RSP = { OK:0x00, ERR:0x01, MORE:0x02 };
 
-/* Formata ms → "s.mmm" */
+/* ── Estado ─────────────────────────────────────────────────────────── */
+let dev = null, chrCmd = null;
+let s_seq = 0;
+/* Mapa seq → {resolve, reject, chunks[]} para comandos em andamento */
+const pending = new Map();
+
+/* Pista em edição (campos do form) */
+let trkDraft = { finish:{is_set:false,lat:0,lon:0,heading:0},
+                 s0:{is_set:false,lat:0,lon:0,heading:0},
+                 s1:{is_set:false,lat:0,lon:0,heading:0} };
+
+/* ── Helpers ─────────────────────────────────────────────────────────── */
 function fmt(ms) {
   if (!ms) return '--.---';
-  const s = Math.floor(ms / 1000);
-  const m = ms % 1000;
-  return s + '.' + String(m).padStart(3, '0');
+  const s = Math.floor(ms/1000), m = ms%1000;
+  return s+'.'+String(m).padStart(3,'0');
+}
+function status(msg, dur) {
+  const el = document.getElementById('op-status');
+  el.textContent = msg; el.style.display = 'block';
+  clearTimeout(el._t);
+  el._t = setTimeout(()=>el.style.display='none', dur||2500);
+}
+function nextSeq() { s_seq = (s_seq+1) & 0xFF; return s_seq; }
+
+/* ── Protocolo BLE cmd/rsp ───────────────────────────────────────────── */
+
+/** Envia um comando e retorna Promise<Uint8Array payload> */
+function sendCmd(cmd, payload) {
+  return new Promise((resolve, reject) => {
+    const seq = nextSeq();
+    const chunks = [];
+    pending.set(seq, { cmd, resolve, reject, chunks });
+
+    const plen = payload ? payload.length : 0;
+    const buf = new Uint8Array(2 + plen);
+    buf[0] = cmd; buf[1] = seq;
+    if (plen > 0) buf.set(payload, 2);
+
+    chrCmd.writeValueWithoutResponse(buf).catch(e => {
+      pending.delete(seq);
+      reject(e);
+    });
+
+    /* timeout de 8s */
+    setTimeout(() => {
+      if (pending.has(seq)) {
+        pending.delete(seq);
+        reject(new Error('timeout cmd=0x'+cmd.toString(16)));
+      }
+    }, 8000);
+  });
 }
 
-/* Decodifica pacote binário de 28 bytes (little-endian) */
-function decode(buf) {
-  const v = new DataView(buf);
-  return {
-    lap_ms:   v.getUint32(0,  true),
-    delta_ms: v.getInt32(4,   true),
-    best_ms:  v.getUint32(8,  true),
-    speed:    v.getUint16(12, true) / 10,
-    heading:  v.getUint16(14, true) / 10,
-    lap_num:  v.getUint16(16, true),
-    sats:     v.getUint8(18),
-    fix:      v.getUint8(19),
-    lat:      v.getInt32(20, true) / 1e6,
-    lon:      v.getInt32(24, true) / 1e6,
-  };
-}
+/** Chamado ao receber notify de RSP */
+function onRsp(event) {
+  const v = new DataView(event.target.value.buffer);
+  if (v.byteLength < 3) return;
+  const cmd    = v.getUint8(0);
+  const seq    = v.getUint8(1);
+  const status = v.getUint8(2);
+  const data   = new Uint8Array(event.target.value.buffer, 3);
 
-function updateUI(p) {
-  /* Velocidade */
-  document.getElementById('spd-val').textContent = Math.round(p.speed);
+  const p = pending.get(seq);
+  if (!p) return;
 
-  /* Tempos */
-  document.getElementById('d-atual').textContent = fmt(p.lap_ms);
-  document.getElementById('d-best').textContent  = p.best_ms ? fmt(p.best_ms) : '--.---';
-
-  /* Volta */
-  document.getElementById('lap-num').textContent = p.lap_num;
-
-  /* Delta */
-  const dEl = document.getElementById('delta-val');
-  if (!p.best_ms || p.lap_num < 2) {
-    dEl.textContent = '--.-';
-    dEl.className = '';
-  } else {
-    const sign = p.delta_ms > 0 ? '+' : '';
-    dEl.textContent = sign + (p.delta_ms / 1000).toFixed(3);
-    dEl.className = p.delta_ms <= 0 ? 'ahead' : 'behind';
-  }
-
-  /* GPS */
-  document.getElementById('gps-dot').style.background = p.fix ? '#4caf50' : '#cf4444';
-  document.getElementById('gps-txt').textContent = 'GPS ' + p.sats;
-
-  /* Coordenadas */
-  if (p.fix) {
-    document.getElementById('coords').textContent =
-      p.lat.toFixed(5) + '°  ' + p.lon.toFixed(5) + '°';
-  }
-}
-
-async function doConnect() {
-  const errEl = document.getElementById('err');
-  const btn   = document.getElementById('btn-conn');
-  errEl.textContent = '';
-
-  if (!navigator.bluetooth) {
-    errEl.textContent = 'Web Bluetooth não suportado. Use Chrome no Android.';
+  if (status === RSP.ERR) {
+    pending.delete(seq);
+    p.reject(new Error('ERR: ' + new TextDecoder().decode(data)));
     return;
   }
 
-  btn.disabled = true;
-  btn.textContent = 'aguardando...';
+  /* Acumula chunks */
+  if (data.length > 0) p.chunks.push(data);
 
+  if (status === RSP.OK) {
+    pending.delete(seq);
+    /* Concatena todos os chunks */
+    const total = p.chunks.reduce((s,c)=>s+c.length, 0);
+    const merged = new Uint8Array(total);
+    let off = 0;
+    for (const c of p.chunks) { merged.set(c, off); off += c.length; }
+    p.resolve(merged);
+  }
+  /* RSP.MORE: aguarda mais chunks, nao resolve ainda */
+}
+
+/* ── Decode / encode helpers ─────────────────────────────────────────── */
+
+function decodeSettings(buf) {
+  const v = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  const dec = new TextDecoder();
+  return {
+    utc_offset_min: v.getInt16(0, true),
+    gate_radius_m:  v.getFloat32(2, true),
+    min_lap_ms:     v.getUint32(6, true),
+    ble_name:  dec.decode(buf.slice(10, 42)).replace(/\0/g,''),
+    wifi_pass: dec.decode(buf.slice(42, 74)).replace(/\0/g,''),
+  };
+}
+
+function encodeSettings(s) {
+  const enc = new TextEncoder();
+  const buf = new Uint8Array(74);
+  const v   = new DataView(buf.buffer);
+  v.setInt16(0,   s.utc_offset_min, true);
+  v.setFloat32(2, s.gate_radius_m,  true);
+  v.setUint32(6,  s.min_lap_ms,     true);
+  const bn = enc.encode(s.ble_name.slice(0,31));
+  const wp = enc.encode(s.wifi_pass.slice(0,31));
+  buf.set(bn, 10);
+  buf.set(wp, 42);
+  return buf;
+}
+
+function decodeTrack(buf) {
+  const v   = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  const dec = new TextDecoder();
+  const TRACK_MAGIC = 0x4B545231;
+  return {
+    magic:          v.getUint32(0, true),
+    name:           dec.decode(buf.slice(4, 36)).replace(/\0/g,''),
+    finish: {
+      lat:     v.getFloat64(36, true),
+      lon:     v.getFloat64(44, true),
+      heading: v.getFloat32(52, true),
+      is_set:  v.getUint8(56) !== 0,
+    },
+    s0: {
+      lat:     v.getFloat64(57, true),
+      lon:     v.getFloat64(65, true),
+      heading: v.getFloat32(73, true),
+      is_set:  v.getUint8(77) !== 0,
+    },
+    s1: {
+      lat:     v.getFloat64(78, true),
+      lon:     v.getFloat64(86, true),
+      heading: v.getFloat32(94, true),
+      is_set:  v.getUint8(98) !== 0,
+    },
+  };
+}
+
+function encodeTrack(t) {
+  const buf = new Uint8Array(99);
+  const v   = new DataView(buf.buffer);
+  const enc = new TextEncoder();
+  v.setUint32(0, 0x4B545231, true);           /* TRACK_MAGIC */
+  const nm = enc.encode(t.name.slice(0,31));
+  buf.set(nm, 4);
+  v.setFloat64(36, t.finish.lat,     true);
+  v.setFloat64(44, t.finish.lon,     true);
+  v.setFloat32(52, t.finish.heading, true);
+  buf[56] = t.finish.is_set ? 1 : 0;
+  v.setFloat64(57, t.s0.lat,     true);
+  v.setFloat64(65, t.s0.lon,     true);
+  v.setFloat32(73, t.s0.heading, true);
+  buf[77] = t.s0.is_set ? 1 : 0;
+  v.setFloat64(78, t.s1.lat,     true);
+  v.setFloat64(86, t.s1.lon,     true);
+  v.setFloat32(94, t.s1.heading, true);
+  buf[98] = t.s1.is_set ? 1 : 0;
+  return buf;
+}
+
+function decodeTelemetry(buf) {
+  const v = new DataView(buf);
+  return {
+    lap_ms:  v.getUint32(0,  true),
+    delta_ms:v.getInt32(4,   true),
+    best_ms: v.getUint32(8,  true),
+    speed:   v.getUint16(12, true) / 10,
+    heading: v.getUint16(14, true) / 10,
+    lap_num: v.getUint16(16, true),
+    sats:    v.getUint8(18),
+    fix:     v.getUint8(19),
+    lat:     v.getInt32(20,  true) / 1e6,
+    lon:     v.getInt32(24,  true) / 1e6,
+  };
+}
+
+/* ── Atualização da UI de telemetria ─────────────────────────────────── */
+function updateTelem(p) {
+  document.getElementById('spd-val').textContent = Math.round(p.speed);
+  document.getElementById('d-atual').textContent = fmt(p.lap_ms);
+  document.getElementById('d-best').textContent  = p.best_ms ? fmt(p.best_ms) : '--.---';
+  document.getElementById('lap-num').textContent = p.lap_num;
+  const dv = document.getElementById('delta-val');
+  if (!p.best_ms || p.lap_num < 2) { dv.textContent='--.-'; dv.className=''; }
+  else {
+    const sign = p.delta_ms > 0 ? '+' : '';
+    dv.textContent = sign + (p.delta_ms/1000).toFixed(3);
+    dv.className = p.delta_ms <= 0 ? 'ahead' : 'behind';
+  }
+  document.getElementById('gps-dot').style.background = p.fix ? '#4caf50' : '#cf4444';
+  document.getElementById('gps-txt').textContent = 'GPS '+p.sats;
+  if (p.fix) document.getElementById('coords').textContent =
+    p.lat.toFixed(5)+'°  '+p.lon.toFixed(5)+'°';
+}
+
+/* ── Navegação de abas ──────────────────────────────────────────────── */
+function showTab(i) {
+  document.querySelectorAll('.tb').forEach((b,j)=>b.classList.toggle('on',j===i));
+  document.querySelectorAll('.page').forEach((p,j)=>p.classList.toggle('on',j===i));
+}
+
+/* ── Conexão BLE ─────────────────────────────────────────────────────── */
+async function doConnect() {
+  const errEl = document.getElementById('conn-err');
+  const btn   = document.getElementById('btn-conn');
+  errEl.textContent = '';
+  if (!navigator.bluetooth) { errEl.textContent='Web Bluetooth não suportado.'; return; }
+
+  btn.disabled = true; btn.textContent = 'aguardando...';
   try {
     dev = await navigator.bluetooth.requestDevice({
       filters: [{ name: 'KartBox' }],
-      optionalServices: [SVC]
+      optionalServices: [SVC_UUID]
     });
     dev.addEventListener('gattserverdisconnected', onDisconn);
-
     btn.textContent = 'conectando...';
+
     const server  = await dev.gatt.connect();
-    const service = await server.getPrimaryService(SVC);
-    const chr     = await service.getCharacteristic(CHR);
+    const service = await server.getPrimaryService(SVC_UUID);
 
-    chr.addEventListener('characteristicvaluechanged', e =>
-      updateUI(decode(e.target.value.buffer))
-    );
-    await chr.startNotifications();
+    /* Telemetria */
+    const chrTelem = await service.getCharacteristic(CHR_TELEM);
+    chrTelem.addEventListener('characteristicvaluechanged', e =>
+      updateTelem(decodeTelemetry(e.target.value.buffer)));
+    await chrTelem.startNotifications();
 
-    /* Lê valor inicial */
-    const init = await chr.readValue();
-    updateUI(decode(init.buffer));
+    /* Controle */
+    chrCmd = await service.getCharacteristic(CHR_CMD);
+    const chrRsp = await service.getCharacteristic(CHR_RSP);
+    chrRsp.addEventListener('characteristicvaluechanged', onRsp);
+    await chrRsp.startNotifications();
 
     setBle(true, dev.name);
     document.getElementById('conn-screen').style.display = 'none';
-    document.getElementById('dash').style.display = 'flex';
+    document.getElementById('main').style.display = 'flex';
     document.getElementById('gps-row').style.display = 'flex';
 
-  } catch (e) {
+    /* Carrega dados iniciais */
+    cfgLoad();
+    trackLoad();
+    sessLoad();
+
+  } catch(e) {
     errEl.textContent = e.message || 'Falha ao conectar.';
-    btn.disabled = false;
-    btn.textContent = 'CONECTAR';
+    btn.disabled = false; btn.textContent = 'CONECTAR';
   }
 }
 
 function onDisconn() {
   setBle(false);
   document.getElementById('conn-screen').style.display = 'flex';
-  document.getElementById('dash').style.display = 'none';
+  document.getElementById('main').style.display = 'none';
   document.getElementById('gps-row').style.display = 'none';
   const btn = document.getElementById('btn-conn');
-  btn.disabled = false;
-  btn.textContent = 'CONECTAR';
+  btn.disabled = false; btn.textContent = 'CONECTAR';
 }
-
-async function disconnect() {
-  if (dev && dev.gatt.connected) dev.gatt.disconnect();
-}
-
+async function disconnect() { if (dev?.gatt?.connected) dev.gatt.disconnect(); }
 function setBle(ok, name) {
-  document.getElementById('ble-dot').style.background  = ok ? '#3a6ad4' : '#2a2a2a';
-  document.getElementById('ble-name').textContent       = ok ? (name || 'KartBox') : 'desconectado';
-  document.getElementById('ble-name').style.color       = ok ? '#3a6ad4' : '#555';
-  document.getElementById('btn-disc').style.display     = ok ? 'block' : 'none';
+  document.getElementById('ble-dot').style.background = ok ? '#3a6ad4' : '#2a2a2a';
+  document.getElementById('ble-name').textContent     = ok ? (name||'KartBox') : 'desconectado';
+  document.getElementById('ble-name').style.color     = ok ? '#3a6ad4' : '#555';
+  document.getElementById('btn-disc').style.display   = ok ? 'block' : 'none';
+}
+
+/* ── CONFIG ──────────────────────────────────────────────────────────── */
+async function cfgLoad() {
+  try {
+    status('Lendo configurações...');
+    const data = await sendCmd(CMD.GET_SETTINGS);
+    const s = decodeSettings(data);
+    document.getElementById('cfg-utc').value     = s.utc_offset_min;
+    document.getElementById('cfg-gate').value    = s.gate_radius_m.toFixed(1);
+    document.getElementById('cfg-minlap').value  = (s.min_lap_ms/1000).toFixed(0);
+    document.getElementById('cfg-blename').value = s.ble_name;
+    document.getElementById('cfg-wifipass').value= s.wifi_pass;
+    status('Configurações carregadas ✓');
+  } catch(e) { status('Erro: '+e.message); }
+}
+async function cfgSave() {
+  try {
+    status('Salvando...');
+    const s = {
+      utc_offset_min: parseInt(document.getElementById('cfg-utc').value),
+      gate_radius_m:  parseFloat(document.getElementById('cfg-gate').value),
+      min_lap_ms:     parseInt(document.getElementById('cfg-minlap').value) * 1000,
+      ble_name:  document.getElementById('cfg-blename').value,
+      wifi_pass: document.getElementById('cfg-wifipass').value,
+    };
+    await sendCmd(CMD.SET_SETTINGS, encodeSettings(s));
+    status('Configurações salvas ✓');
+  } catch(e) { status('Erro: '+e.message); }
+}
+
+/* ── PISTAS ───────────────────────────────────────────────────────────── */
+async function trackLoad() {
+  try {
+    status('Carregando pistas...');
+    const data = await sendCmd(CMD.LIST_TRACKS);
+    const names = new TextDecoder().decode(data).split('\n').filter(n=>n.trim());
+    const list  = document.getElementById('track-list');
+    if (!names.length) {
+      list.innerHTML = '<div style="padding:24px;font-size:11px;color:#2a2a2a;text-align:center">nenhuma pista salva</div>';
+      status('Nenhuma pista encontrada');
+      return;
+    }
+    list.innerHTML = names.map(n => `
+      <div class="list-item">
+        <div><div class="list-name">${n}</div></div>
+        <button class="ibtn g" onclick="trkEdit('${n}')">editar</button>
+        <button class="ibtn r" onclick="trkDel('${n}')">excluir</button>
+      </div>`).join('');
+    status(`${names.length} pista(s) carregada(s)`);
+  } catch(e) { status('Erro: '+e.message); }
+}
+
+async function trkEdit(name) {
+  try {
+    status('Carregando pista...');
+    const enc  = new TextEncoder();
+    const data = await sendCmd(CMD.GET_TRACK, enc.encode(name));
+    const trk  = decodeTrack(data);
+    trkDraft   = { finish:trk.finish, s0:trk.s0, s1:trk.s1 };
+    document.getElementById('trk-name').value = trk.name;
+    updTrkForm();
+    showTab(2);
+    status('Pista carregada: '+name);
+  } catch(e) { status('Erro: '+e.message); }
+}
+
+function updTrkForm() {
+  const f = trkDraft.finish;
+  document.getElementById('trk-finish').textContent =
+    f.is_set ? `${f.lat.toFixed(5)}, ${f.lon.toFixed(5)}` : '—';
+  document.getElementById('trk-finish').style.color = f.is_set ? '#4caf50' : '#555';
+  const s0 = trkDraft.s0;
+  document.getElementById('trk-s0').textContent =
+    s0.is_set ? `${s0.lat.toFixed(5)}, ${s0.lon.toFixed(5)}` : '—';
+  document.getElementById('trk-s0').style.color = s0.is_set ? '#4caf50' : '#555';
+  const s1 = trkDraft.s1;
+  document.getElementById('trk-s1').textContent =
+    s1.is_set ? `${s1.lat.toFixed(5)}, ${s1.lon.toFixed(5)}` : '—';
+  document.getElementById('trk-s1').style.color = s1.is_set ? '#4caf50' : '#555';
+}
+
+async function trkSave() {
+  const name = document.getElementById('trk-name').value.trim();
+  if (!name) { status('Nome vazio'); return; }
+  try {
+    status('Salvando pista...');
+    const t = { name, finish:trkDraft.finish, s0:trkDraft.s0, s1:trkDraft.s1 };
+    await sendCmd(CMD.PUT_TRACK, encodeTrack(t));
+    status('Pista salva: '+name+' ✓');
+    trackLoad();
+  } catch(e) { status('Erro: '+e.message); }
+}
+
+async function trkDel(name) {
+  if (!confirm(`Excluir pista "${name}"?`)) return;
+  try {
+    status('Excluindo...');
+    const enc = new TextEncoder();
+    await sendCmd(CMD.DEL_TRACK, enc.encode(name));
+    status('Pista excluída ✓');
+    trackLoad();
+  } catch(e) { status('Erro: '+e.message); }
+}
+
+function trkClear() {
+  document.getElementById('trk-name').value = '';
+  trkDraft = { finish:{is_set:false,lat:0,lon:0,heading:0},
+               s0:{is_set:false,lat:0,lon:0,heading:0},
+               s1:{is_set:false,lat:0,lon:0,heading:0} };
+  updTrkForm();
+}
+
+/* ── SESSÕES ──────────────────────────────────────────────────────────── */
+async function sessLoad() {
+  try {
+    status('Carregando sessões...');
+    const data  = await sendCmd(CMD.LIST_SESSIONS);
+    const names = new TextDecoder().decode(data).split('\n').filter(n=>n.trim());
+    const list  = document.getElementById('sess-list');
+    if (!names.length) {
+      list.innerHTML = '<div style="padding:24px;font-size:11px;color:#2a2a2a;text-align:center">nenhuma sessão gravada</div>';
+      status('Nenhuma sessão encontrada');
+      return;
+    }
+    list.innerHTML = names.map(n => `
+      <div class="list-item">
+        <div><div class="list-name" style="font-size:11px">${n}</div></div>
+        <button class="ibtn g" onclick="sessDownload('${n}')">baixar</button>
+      </div>`).join('');
+    status(`${names.length} sessão(ões) encontrada(s)`);
+  } catch(e) { status('Erro: '+e.message); }
+}
+
+async function sessDownload(filename) {
+  try {
+    status('Baixando '+filename+'...');
+    const enc  = new TextEncoder();
+    const data = await sendCmd(CMD.GET_SESSION, enc.encode(filename));
+    const blob = new Blob([data], {type:'text/csv'});
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+    status('Download concluído ✓');
+  } catch(e) { status('Erro: '+e.message); }
+}
+
+async function sessDelAll() {
+  if (!confirm('Apagar TODAS as sessões do SD?')) return;
+  try {
+    status('Apagando...');
+    await sendCmd(CMD.DEL_ALL_SESSIONS);
+    status('Sessões apagadas ✓');
+    sessLoad();
+  } catch(e) { status('Erro: '+e.message); }
 }
 </script>
 </body>
