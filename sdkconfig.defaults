@@ -1,0 +1,31 @@
+# sdkconfig.defaults — KartBox v2
+# Aplicado automaticamente pelo idf.py build (não substitui sdkconfig existente).
+# Após o primeiro build, edite via: idf.py menuconfig
+
+# ── Target ──────────────────────────────────────────────────────────────────
+CONFIG_IDF_TARGET="esp32p4"
+
+# ── Bluetooth (NimBLE host no P4, controller no C6 coprocessador) ───────────
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_BT_CONTROLLER_ENABLED=n
+
+# ── WiFi ────────────────────────────────────────────────────────────────────
+CONFIG_ESP_WIFI_ENABLED=y
+
+# ── USB (TinyUSB MSC para modo pen drive) ───────────────────────────────────
+CONFIG_TINYUSB_ENABLED=y
+CONFIG_TINYUSB_MSC_ENABLED=y
+
+# ── NVS (settings persistidos) ──────────────────────────────────────────────
+CONFIG_NVS_ENCRYPTION=n
+
+# ── LVGL (via esp_lvgl_port — não mexer sem checar display_init.c) ──────────
+CONFIG_LV_COLOR_DEPTH_16=y
+
+# ── Stack sizes ──────────────────────────────────────────────────────────────
+# LVGL precisa de stack generoso; GPS e SD rodam em tasks separadas
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# ── Log ─────────────────────────────────────────────────────────────────────
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y

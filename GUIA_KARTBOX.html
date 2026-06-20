@@ -1,0 +1,945 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KartBox v2 — Guia de Uso</title>
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --surface: #111;
+    --border: #222;
+    --text: #e8ece8;
+    --muted: #7a847a;
+    --green: #3EE07A;
+    --green-dim: #163920;
+    --red: #FF5A5A;
+    --red-dim: #2A1414;
+    --blue: #5FB8E8;
+    --gold: #FFD700;
+    --accent: #3EE07A;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    font-size: 14px;
+    line-height: 1.7;
+  }
+  a { color: var(--green); text-decoration: none; }
+
+  /* ── layout ── */
+  .page { max-width: 860px; margin: 0 auto; padding: 48px 24px 80px; }
+
+  /* ── header ── */
+  .hero {
+    text-align: center;
+    padding: 48px 0 40px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 48px;
+  }
+  .hero-logo {
+    font-size: 11px;
+    letter-spacing: 5px;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-bottom: 16px;
+  }
+  .hero h1 {
+    font-size: 36px;
+    font-weight: 700;
+    color: var(--green);
+    letter-spacing: -1px;
+    margin-bottom: 12px;
+  }
+  .hero p { color: var(--muted); font-size: 14px; }
+
+  /* ── sections ── */
+  section { margin-bottom: 64px; }
+  h2 {
+    font-size: 11px;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    color: var(--green);
+    margin-bottom: 24px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--green-dim);
+  }
+  h3 {
+    font-size: 16px;
+    color: var(--text);
+    margin: 28px 0 12px;
+    font-weight: 600;
+  }
+  p { color: #c0c8c0; margin-bottom: 14px; }
+
+  /* ── screen mockup ── */
+  .screen-wrap {
+    display: flex;
+    justify-content: center;
+    margin: 28px 0 20px;
+  }
+  .screen-wrap svg {
+    border-radius: 8px;
+    box-shadow: 0 0 0 1px #333, 0 8px 32px rgba(0,0,0,.6);
+  }
+  .screen-caption {
+    text-align: center;
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 20px;
+  }
+
+  /* ── call-out boxes ── */
+  .box {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px 20px;
+    margin: 20px 0;
+    background: var(--surface);
+  }
+  .box.green  { border-color: var(--green-dim); background: #0b1a10; }
+  .box.red    { border-color: var(--red-dim);   background: #160a0a; }
+  .box.blue   { border-color: #1a3040;          background: #080f14; }
+  .box.gold   { border-color: #3a3000;          background: #110f00; }
+  .box-label {
+    font-size: 10px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .box.green  .box-label { color: var(--green); }
+  .box.red    .box-label { color: var(--red);   }
+  .box.blue   .box-label { color: var(--blue);  }
+  .box.gold   .box-label { color: var(--gold);  }
+
+  /* ── button reference ── */
+  .btn-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin: 20px 0;
+  }
+  .btn-card {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 18px 14px;
+    background: var(--surface);
+    text-align: center;
+  }
+  .btn-card .label {
+    font-size: 10px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--green);
+    margin-bottom: 6px;
+  }
+  .btn-card .name  { font-size: 15px; font-weight: 700; margin-bottom: 10px; }
+  .btn-card .desc  { font-size: 12px; color: var(--muted); line-height: 1.5; }
+  .btn-card .tap   { display: inline-block; margin-top: 10px; font-size: 11px;
+                     background: var(--green-dim); color: var(--green);
+                     padding: 3px 8px; border-radius: 3px; }
+  .btn-card .hold  { display: inline-block; margin-top: 4px; font-size: 11px;
+                     background: var(--red-dim); color: var(--red);
+                     padding: 3px 8px; border-radius: 3px; }
+
+  /* ── step list ── */
+  .steps { list-style: none; margin: 16px 0; }
+  .steps li {
+    display: flex;
+    gap: 14px;
+    padding: 10px 0;
+    border-bottom: 1px solid #1a1a1a;
+    color: #c0c8c0;
+    font-size: 13px;
+  }
+  .steps li:last-child { border-bottom: none; }
+  .step-num {
+    flex-shrink: 0;
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: var(--green-dim);
+    color: var(--green);
+    font-size: 11px;
+    font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    margin-top: 1px;
+  }
+
+  /* ── indicator legend ── */
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; margin: 16px 0; }
+  .legend-item { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+  /* ── table ── */
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 13px; }
+  th { text-align: left; padding: 8px 12px; color: var(--muted); font-weight: 400;
+       font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
+       border-bottom: 1px solid var(--border); }
+  td { padding: 10px 12px; border-bottom: 1px solid #161616; color: #c0c8c0; }
+  tr:last-child td { border-bottom: none; }
+  td:first-child { color: var(--text); font-weight: 600; }
+
+  /* ── toc ── */
+  .toc { background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+         padding: 20px 24px; margin-bottom: 48px; }
+  .toc-title { font-size: 10px; letter-spacing: 3px; text-transform: uppercase;
+               color: var(--muted); margin-bottom: 12px; }
+  .toc ol { padding-left: 20px; }
+  .toc li { padding: 3px 0; }
+  .toc a { color: #c0c8c0; }
+  .toc a:hover { color: var(--green); }
+
+  /* ── kbd ── */
+  kbd { display: inline-block; padding: 2px 7px; border: 1px solid #333;
+        border-radius: 3px; background: #1a1a1a; font-size: 11px; font-family: inherit; }
+</style>
+</head>
+<body>
+<div class="page">
+
+<!-- ═══════════════════════════════════════════════════════════ HERO -->
+<div class="hero">
+  <div class="hero-logo">Kartbox</div>
+  <h1>v2 — Guia Completo</h1>
+  <p>Transponder de cronometragem GPS para kart &nbsp;·&nbsp; ESP32 + LVGL &nbsp;·&nbsp; Display 480×320</p>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ TOC -->
+<div class="toc">
+  <div class="toc-title">Conteúdo</div>
+  <ol>
+    <li><a href="#hardware">Hardware — botões e conectores</a></li>
+    <li><a href="#primeira-vez">Primeira vez: marcar a linha de chegada</a></li>
+    <li><a href="#corrida">Tela principal — Aba CORRIDA</a></li>
+    <li><a href="#voltas">Histórico — Aba VOLTAS</a></li>
+    <li><a href="#config">Configurações — Aba CONFIG</a></li>
+    <li><a href="#fluxo">Fluxo completo de sessão</a></li>
+    <li><a href="#ble">Telemetria BLE ao vivo</a></li>
+    <li><a href="#wifi">Exportar via WiFi</a></li>
+    <li><a href="#usb">Modo pen drive (USB)</a></li>
+    <li><a href="#modos">Modos QUALY vs CORRIDA</a></li>
+    <li><a href="#indicadores">Referência de indicadores</a></li>
+  </ol>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ 1. HARDWARE -->
+<section id="hardware">
+<h2>01 · Hardware — Botões e Conectores</h2>
+
+<p>O KartBox tem três botões físicos na lateral do gabinete. Todos operam em lógica invertida (ativo em LOW, pull-up interno).</p>
+
+<div class="btn-grid">
+  <div class="btn-card">
+    <div class="label">Botão 1</div>
+    <div class="name">MODE</div>
+    <div class="desc">Alterna entre os modos de corrida. Só funciona com sessão parada.</div>
+    <span class="tap">tap → QUALY ↔ RACE</span>
+  </div>
+  <div class="btn-card">
+    <div class="label">Botão 2</div>
+    <div class="name">SET LINE</div>
+    <div class="desc">Grava a posição e direção GPS atual como linha de chegada.</div>
+    <span class="tap">tap → marca gate</span>
+  </div>
+  <div class="btn-card">
+    <div class="label">Botão 3</div>
+    <div class="name">RESET</div>
+    <div class="desc">Inicia uma nova sessão (tap). Encerra a sessão ativa (segurar).</div>
+    <span class="tap">tap → inicia</span><br>
+    <span class="hold">hold 1,5 s → encerra</span>
+  </div>
+</div>
+
+<div class="box blue">
+  <div class="box-label">Nota de montagem</div>
+  Posicione o KartBox fixo no kart <strong>antes</strong> de marcar a linha — a direção (heading) do GPS no momento do SET LINE define o vetor de cruzamento. Se o dispositivo estiver solto ou girado, o gate vai detectar cruzamentos errados.
+</div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════ 2. PRIMEIRA VEZ -->
+<section id="primeira-vez">
+<h2>02 · Primeira vez: marcando a linha de chegada</h2>
+
+<ol class="steps">
+  <li><span class="step-num">1</span>Ligue o KartBox e aguarde o ponto GPS na status bar ficar <strong style="color:var(--green)">verde</strong>. Isso indica fix válido com pelo menos alguns satélites.</li>
+  <li><span class="step-num">2</span>Dirija o kart até a <strong>linha de chegada</strong>, posicionado como se fosse cruzá-la normalmente (mesma direção que você vai cruzar na prova).</li>
+  <li><span class="step-num">3</span>Pressione <kbd>SET LINE</kbd> uma vez. O KartBox congela latitude, longitude e heading nesse instante — esse é o gate.</li>
+  <li><span class="step-num">4</span>A partir daí, cada vez que o kart cruzar o raio configurado (padrão 15 m) na mesma direção, uma volta é registrada.</li>
+  <li><span class="step-num">5</span>O gate <strong>sobrevive a desligamentos</strong> — não precisa remarcar a cada sessão no mesmo kartódromo. Refaça o SET LINE só se mudar de pista.</li>
+</ol>
+
+<div class="box gold">
+  <div class="box-label">Dica de precisão</div>
+  Se o GPS demorar pra fixar (sinal fraco, garagem coberta), espere o indicador <strong style="color:var(--green)">GPS 6+</strong> antes de marcar. Com menos de 4 satélites o erro de posição pode fazer o gate não detectar cruzamentos corretamente.
+</div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════ 3. ABA CORRIDA -->
+<section id="corrida">
+<h2>03 · Tela principal — Aba CORRIDA</h2>
+
+<p>Essa é a tela que fica aberta durante a sessão. Toda a informação relevante está visível sem precisar rolar ou tocar em nada.</p>
+
+<!-- MOCKUP CORRIDA -->
+<div class="screen-wrap">
+<svg width="480" height="320" viewBox="0 0 480 320" xmlns="http://www.w3.org/2000/svg" style="background:#000">
+  <!-- Status bar -->
+  <rect width="480" height="24" fill="#000"/>
+  <line x1="0" y1="24" x2="480" y2="24" stroke="#262626" stroke-width="1"/>
+  <!-- GPS dot green -->
+  <circle cx="20" cy="12" r="4" fill="#3EE07A"/>
+  <text x="30" y="16" fill="#7A847A" font-size="10" font-family="monospace">GPS 8</text>
+  <!-- Mode pill -->
+  <rect x="207" y="4" width="66" height="16" rx="8" fill="#163920"/>
+  <text x="240" y="15.5" fill="#3EE07A" font-size="10" font-family="monospace" text-anchor="middle">QUALY</text>
+  <!-- REC dot red -->
+  <circle cx="404" cy="12" r="4" fill="#FF5A5A"/>
+  <!-- BLE -->
+  <text x="418" y="16" fill="#5FB8E8" font-size="10" font-family="monospace">BLE</text>
+
+  <!-- Delta LED bar -->
+  <rect x="0" y="24" width="480" height="22" fill="#000"/>
+  <!-- left (red) segs - losing -2 lit -->
+  <rect x="14"  y="29" width="14" height="12" rx="1" fill="#FF5A5A"/>
+  <rect x="30"  y="29" width="14" height="12" rx="1" fill="#FF5A5A"/>
+  <rect x="46"  y="29" width="14" height="12" rx="1" fill="#2A1414"/>
+  <rect x="62"  y="29" width="14" height="12" rx="1" fill="#2A1414"/>
+  <rect x="78"  y="29" width="14" height="12" rx="1" fill="#2A1414"/>
+  <rect x="94"  y="29" width="14" height="12" rx="1" fill="#2A1414"/>
+  <rect x="110" y="29" width="14" height="12" rx="1" fill="#2A1414"/>
+  <rect x="126" y="29" width="14" height="12" rx="1" fill="#2A1414"/>
+  <!-- center divider -->
+  <rect x="237" y="27" width="2" height="16" fill="#262626"/>
+  <!-- right (green) segs - all dim -->
+  <rect x="242" y="29" width="14" height="12" rx="1" fill="#163920"/>
+  <rect x="258" y="29" width="14" height="12" rx="1" fill="#163920"/>
+  <rect x="274" y="29" width="14" height="12" rx="1" fill="#163920"/>
+  <rect x="290" y="29" width="14" height="12" rx="1" fill="#163920"/>
+  <rect x="306" y="29" width="14" height="12" rx="1" fill="#163920"/>
+  <rect x="322" y="29" width="14" height="12" rx="1" fill="#163920"/>
+  <rect x="338" y="29" width="14" height="12" rx="1" fill="#163920"/>
+  <rect x="354" y="29" width="14" height="12" rx="1" fill="#163920"/>
+
+  <!-- Content area (46 to 280) -->
+  <!-- Left col border -->
+  <line x1="160" y1="46" x2="160" y2="280" stroke="#262626" stroke-width="1"/>
+  <!-- Right col border -->
+  <line x1="320" y1="46" x2="320" y2="280" stroke="#262626" stroke-width="1"/>
+  <!-- Left col mid border -->
+  <line x1="0" y1="163" x2="160" y2="163" stroke="#262626" stroke-width="1"/>
+  <!-- Right col mid border -->
+  <line x1="320" y1="163" x2="480" y2="163" stroke="#262626" stroke-width="1"/>
+
+  <!-- ATUAL label + value -->
+  <text x="80" y="90" fill="#7A847A" font-size="10" font-family="monospace" text-anchor="middle">ATUAL</text>
+  <text x="80" y="138" fill="#F5F8F5" font-size="32" font-family="monospace" text-anchor="middle" font-weight="bold">1.347</text>
+
+  <!-- BEST label + value -->
+  <text x="80" y="192" fill="#7A847A" font-size="10" font-family="monospace" text-anchor="middle">BEST</text>
+  <text x="80" y="240" fill="#F5F8F5" font-size="32" font-family="monospace" text-anchor="middle" font-weight="bold">1.334</text>
+
+  <!-- Center: speed -->
+  <text x="235" y="178" fill="#F5F8F5" font-size="72" font-family="monospace" text-anchor="middle" font-weight="bold">87</text>
+  <text x="284" y="192" fill="#7A847A" font-size="12" font-family="monospace">km/h</text>
+
+  <!-- Delta row -->
+  <text x="220" y="230" fill="#3EE07A" font-size="11" font-family="monospace" text-anchor="middle">DELTA</text>
+  <text x="272" y="232" fill="#FF5A5A" font-size="20" font-family="monospace" text-anchor="middle" font-weight="bold">+0.13</text>
+
+  <!-- Right col: VOLTA -->
+  <text x="400" y="90" fill="#7A847A" font-size="10" font-family="monospace" text-anchor="middle">VOLTA</text>
+  <text x="400" y="138" fill="#F5F8F5" font-size="48" font-family="monospace" text-anchor="middle" font-weight="bold">7</text>
+
+  <!-- Right col: VEL MAX -->
+  <text x="400" y="192" fill="#7A847A" font-size="10" font-family="monospace" text-anchor="middle">VEL MAX</text>
+  <text x="400" y="240" fill="#F5F8F5" font-size="32" font-family="monospace" text-anchor="middle" font-weight="bold">94</text>
+
+  <!-- Tab bar -->
+  <rect x="0" y="280" width="480" height="40" fill="#000"/>
+  <line x1="0" y1="280" x2="480" y2="280" stroke="#262626" stroke-width="1"/>
+  <line x1="160" y1="280" x2="160" y2="320" stroke="#262626" stroke-width="1"/>
+  <line x1="320" y1="280" x2="320" y2="320" stroke="#262626" stroke-width="1"/>
+  <text x="80"  y="306" fill="#3EE07A" font-size="11" font-family="monospace" text-anchor="middle" font-weight="bold">CORRIDA</text>
+  <text x="240" y="306" fill="#7A847A" font-size="11" font-family="monospace" text-anchor="middle">VOLTAS</text>
+  <text x="400" y="306" fill="#7A847A" font-size="11" font-family="monospace" text-anchor="middle">CONFIG</text>
+</svg>
+</div>
+<div class="screen-caption">Aba CORRIDA — sessão ativa, volta 7, perdendo +0,13 s para o best</div>
+
+<h3>Barra de LED (Delta visual)</h3>
+<p>A barra de segmentos no topo funciona como shift-light de RPM — mas para o delta de tempo. Cada lado tem 8 LEDs, cada um representando ~187 ms de diferença (escala de 0 a 1.500 ms total). A barra inteira acesa = 1,5 s de diferença.</p>
+
+<div class="legend">
+  <div class="legend-item"><div class="dot" style="background:var(--red)"></div> LEDs vermelhos (esquerda) acesos → perdendo tempo para o best</div>
+  <div class="legend-item"><div class="dot" style="background:var(--green)"></div> LEDs verdes (direita) acesos → ganhando tempo, melhor que o best</div>
+  <div class="legend-item"><div class="dot" style="background:#333"></div> Todos apagados → primeira volta ou sem best ainda</div>
+</div>
+
+<h3>Flash de final de volta</h3>
+<p>Ao cruzar a linha, o centro da tela pisca por 500 ms:</p>
+<div class="legend">
+  <div class="legend-item"><div class="dot" style="background:var(--gold)"></div> <strong style="color:var(--gold)">Dourado</strong> — novo recorde absoluto (best lap batido)</div>
+  <div class="legend-item"><div class="dot" style="background:var(--green)"></div> <strong style="color:var(--green)">Verde</strong> — volta mais rápida que o melhor anterior (mas não o menor geral)</div>
+  <div class="legend-item"><div class="dot" style="background:var(--red)"></div> <strong style="color:var(--red)">Vermelho</strong> — volta mais lenta que o best</div>
+</div>
+
+<h3>Campos da tela</h3>
+<table>
+  <tr><th>Campo</th><th>Descrição</th><th>Reset</th></tr>
+  <tr><td>ATUAL</td><td>Tempo decorrido na volta em andamento (atualiza a 10 Hz)</td><td>Ao cruzar a linha</td></tr>
+  <tr><td>BEST</td><td>Menor tempo de volta da sessão atual</td><td>Nova sessão</td></tr>
+  <tr><td>Velocidade (centro)</td><td>Velocidade instantânea GPS em km/h</td><td>—</td></tr>
+  <tr><td>DELTA</td><td>Diferença da última volta fechada vs o best anterior a ela. <span style="color:var(--green)">Verde = mais rápido</span>, <span style="color:var(--red)">vermelho = mais lento</span></td><td>Nova sessão</td></tr>
+  <tr><td>VOLTA</td><td>Número da volta atual</td><td>Nova sessão</td></tr>
+  <tr><td>VEL MAX</td><td>Velocidade máxima atingida na sessão inteira</td><td>Nova sessão</td></tr>
+</table>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════ 4. ABA VOLTAS -->
+<section id="voltas">
+<h2>04 · Histórico — Aba VOLTAS</h2>
+
+<p>Permite ler volta-a-volta de qualquer sessão gravada no cartão SD, sem precisar conectar o cabo.</p>
+
+<!-- MOCKUP VOLTAS -->
+<div class="screen-wrap">
+<svg width="480" height="320" viewBox="0 0 480 320" xmlns="http://www.w3.org/2000/svg" style="background:#000">
+  <!-- Status bar -->
+  <rect width="480" height="24" fill="#000"/>
+  <line x1="0" y1="24" x2="480" y2="24" stroke="#262626" stroke-width="1"/>
+  <circle cx="20" cy="12" r="4" fill="#3EE07A"/>
+  <text x="30" y="16" fill="#7A847A" font-size="10" font-family="monospace">GPS 8</text>
+  <rect x="207" y="4" width="66" height="16" rx="8" fill="#163920"/>
+  <text x="240" y="15.5" fill="#3EE07A" font-size="10" font-family="monospace" text-anchor="middle">QUALY</text>
+  <circle cx="404" cy="12" r="4" fill="#7A847A"/>
+  <text x="418" y="16" fill="#7A847A" font-size="10" font-family="monospace">BLE</text>
+
+  <!-- Delta LED bar -->
+  <rect x="0" y="24" width="480" height="22" fill="#000"/>
+  <rect x="14"  y="29" width="14" height="12" rx="1" fill="#2A1414"/>
+  <rect x="30"  y="29" width="14" height="12" rx="1" fill="#2A1414"/>
+  <rect x="46"  y="29" width="14" height="12" rx="1" fill="#2A1414"/>
+  <rect x="62"  y="29" width="14" height="12" rx="1" fill="#2A1414"/>
+  <rect x="78"  y="29" width="14" height="12" rx="1" fill="#2A1414"/>
+  <rect x="94"  y="29" width="14" height="12" rx="1" fill="#2A1414"/>
+  <rect x="110" y="29" width="14" height="12" rx="1" fill="#2A1414"/>
+  <rect x="126" y="29" width="14" height="12" rx="1" fill="#2A1414"/>
+  <rect x="237" y="27" width="2" height="16" fill="#262626"/>
+  <rect x="242" y="29" width="14" height="12" rx="1" fill="#163920"/>
+  <rect x="258" y="29" width="14" height="12" rx="1" fill="#163920"/>
+  <rect x="274" y="29" width="14" height="12" rx="1" fill="#163920"/>
+  <rect x="290" y="29" width="14" height="12" rx="1" fill="#163920"/>
+  <rect x="306" y="29" width="14" height="12" rx="1" fill="#163920"/>
+  <rect x="322" y="29" width="14" height="12" rx="1" fill="#163920"/>
+  <rect x="338" y="29" width="14" height="12" rx="1" fill="#163920"/>
+  <rect x="354" y="29" width="14" height="12" rx="1" fill="#163920"/>
+
+  <!-- Content: Laps tab -->
+  <rect x="0" y="46" width="480" height="234" fill="#000"/>
+
+  <!-- Header row -->
+  <rect x="12" y="58" width="280" height="28" rx="3" fill="#1a1a1a" stroke="#333" stroke-width="1"/>
+  <text x="24" y="76" fill="#7A847A" font-size="11" font-family="monospace">20250620_103015.csv</text>
+  <text x="308" y="75" fill="#7A847A" font-size="9" font-family="monospace">▼</text>
+  <rect x="370" y="58" width="100" height="28" rx="3" fill="#1a1a1a" stroke="#333" stroke-width="1"/>
+  <text x="420" y="76" fill="#7A847A" font-size="10" font-family="monospace" text-anchor="middle">atualizar</text>
+
+  <!-- Lap rows -->
+  <!-- Best lap: volta 3 -->
+  <rect x="12" y="96" width="456" height="26" rx="2" fill="#163920"/>
+  <text x="22"  y="113" fill="#F5F8F5" font-size="11" font-family="monospace">Volta 3</text>
+  <text x="150" y="113" fill="#F5F8F5" font-size="11" font-family="monospace">1.334</text>
+  <text x="270" y="113" fill="#3EE07A" font-size="11" font-family="monospace">BEST</text>
+  <text x="390" y="113" fill="#7A847A" font-size="11" font-family="monospace">94km/h</text>
+
+  <rect x="12" y="124" width="456" height="26" fill="#000"/>
+  <text x="22"  y="141" fill="#F5F8F5" font-size="11" font-family="monospace">Volta 1</text>
+  <text x="150" y="141" fill="#F5F8F5" font-size="11" font-family="monospace">1.412</text>
+  <text x="270" y="141" fill="#FF5A5A" font-size="11" font-family="monospace">+0.78</text>
+  <text x="390" y="141" fill="#7A847A" font-size="11" font-family="monospace">91km/h</text>
+
+  <rect x="12" y="152" width="456" height="26" fill="#000"/>
+  <text x="22"  y="169" fill="#F5F8F5" font-size="11" font-family="monospace">Volta 2</text>
+  <text x="150" y="169" fill="#F5F8F5" font-size="11" font-family="monospace">1.378</text>
+  <text x="270" y="169" fill="#FF5A5A" font-size="11" font-family="monospace">+0.44</text>
+  <text x="390" y="169" fill="#7A847A" font-size="11" font-family="monospace">92km/h</text>
+
+  <rect x="12" y="180" width="456" height="26" fill="#000"/>
+  <text x="22"  y="197" fill="#F5F8F5" font-size="11" font-family="monospace">Volta 4</text>
+  <text x="150" y="197" fill="#F5F8F5" font-size="11" font-family="monospace">1.351</text>
+  <text x="270" y="197" fill="#FF5A5A" font-size="11" font-family="monospace">+0.17</text>
+  <text x="390" y="197" fill="#7A847A" font-size="11" font-family="monospace">93km/h</text>
+
+  <rect x="12" y="208" width="456" height="26" fill="#000"/>
+  <text x="22"  y="225" fill="#F5F8F5" font-size="11" font-family="monospace">Volta 5</text>
+  <text x="150" y="225" fill="#F5F8F5" font-size="11" font-family="monospace">1.341</text>
+  <text x="270" y="225" fill="#3EE07A" font-size="11" font-family="monospace">-0.10</text>
+  <text x="390" y="225" fill="#7A847A" font-size="11" font-family="monospace">93km/h</text>
+
+  <!-- col headers ghost -->
+  <text x="150" y="255" fill="#262626" font-size="10" font-family="monospace">tempo</text>
+  <text x="270" y="255" fill="#262626" font-size="10" font-family="monospace">delta</text>
+  <text x="390" y="255" fill="#262626" font-size="10" font-family="monospace">vel max</text>
+
+  <!-- Tab bar -->
+  <rect x="0" y="280" width="480" height="40" fill="#000"/>
+  <line x1="0" y1="280" x2="480" y2="280" stroke="#262626" stroke-width="1"/>
+  <line x1="160" y1="280" x2="160" y2="320" stroke="#262626" stroke-width="1"/>
+  <line x1="320" y1="280" x2="320" y2="320" stroke="#262626" stroke-width="1"/>
+  <text x="80"  y="306" fill="#7A847A" font-size="11" font-family="monospace" text-anchor="middle">CORRIDA</text>
+  <text x="240" y="306" fill="#3EE07A" font-size="11" font-family="monospace" text-anchor="middle" font-weight="bold">VOLTAS</text>
+  <text x="400" y="306" fill="#7A847A" font-size="11" font-family="monospace" text-anchor="middle">CONFIG</text>
+</svg>
+</div>
+<div class="screen-caption">Aba VOLTAS — sessão 20250620 com 5 voltas. Volta 3 é o best (fundo verde)</div>
+
+<h3>Como usar</h3>
+<ol class="steps">
+  <li><span class="step-num">1</span>Toque em <kbd>VOLTAS</kbd> na barra inferior.</li>
+  <li><span class="step-num">2</span>O dropdown no topo lista todas as sessões salvas no SD, mais recente primeiro. Formato: <code>AAAAMMDD_HHMMSS.csv</code>.</li>
+  <li><span class="step-num">3</span>Toque no dropdown e selecione a sessão desejada — a lista de voltas carrega automaticamente.</li>
+  <li><span class="step-num">4</span>Se o SD foi modificado externamente (via WiFi ou USB), toque em <kbd>atualizar</kbd> para recarregar a lista.</li>
+</ol>
+
+<h3>Colunas da lista</h3>
+<table>
+  <tr><th>Coluna</th><th>Descrição</th></tr>
+  <tr><td>Volta N</td><td>Número sequencial da volta na sessão</td></tr>
+  <tr><td>Tempo</td><td>Duração em segundos e milissegundos (ex: 1.334 = 1 min 33,4 s)</td></tr>
+  <tr><td>Delta</td><td>Diferença vs o best <em>até aquele ponto da sessão</em>. Verde = mais rápido, vermelho = mais lento</td></tr>
+  <tr><td>Vel max</td><td>Pico de velocidade GPS registrado durante a volta</td></tr>
+</table>
+
+<div class="box green">
+  <div class="box-label">Destaque visual</div>
+  A volta com menor tempo da sessão tem fundo verde e exibe <strong style="color:var(--green)">BEST</strong> no lugar do delta — fácil de identificar com o rabo do olho.
+</div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════ 5. ABA CONFIG -->
+<section id="config">
+<h2>05 · Configurações — Aba CONFIG</h2>
+
+<p>A aba CONFIG é scrollável — deslize para cima para ver os campos de texto no final.</p>
+
+<!-- MOCKUP CONFIG (topo) -->
+<div class="screen-wrap">
+<svg width="480" height="320" viewBox="0 0 480 320" xmlns="http://www.w3.org/2000/svg" style="background:#000">
+  <!-- Status bar -->
+  <rect width="480" height="24" fill="#000"/>
+  <line x1="0" y1="24" x2="480" y2="24" stroke="#262626" stroke-width="1"/>
+  <circle cx="20" cy="12" r="4" fill="#3EE07A"/>
+  <text x="30" y="16" fill="#7A847A" font-size="10" font-family="monospace">GPS 8</text>
+  <rect x="207" y="4" width="66" height="16" rx="8" fill="#163920"/>
+  <text x="240" y="15.5" fill="#3EE07A" font-size="10" font-family="monospace" text-anchor="middle">QUALY</text>
+  <circle cx="404" cy="12" r="4" fill="#7A847A"/>
+  <text x="418" y="16" fill="#7A847A" font-size="10" font-family="monospace">BLE</text>
+
+  <!-- Delta LED bar -->
+  <rect x="0" y="24" width="480" height="22" fill="#000"/>
+  <rect x="237" y="27" width="2" height="16" fill="#262626"/>
+  <rect x="14"  y="29" width="14" height="12" rx="1" fill="#2A1414"/>
+  <rect x="30"  y="29" width="14" height="12" rx="1" fill="#2A1414"/>
+  <rect x="46"  y="29" width="14" height="12" rx="1" fill="#2A1414"/>
+  <rect x="62"  y="29" width="14" height="12" rx="1" fill="#2A1414"/>
+  <rect x="78"  y="29" width="14" height="12" rx="1" fill="#2A1414"/>
+  <rect x="94"  y="29" width="14" height="12" rx="1" fill="#2A1414"/>
+  <rect x="110" y="29" width="14" height="12" rx="1" fill="#2A1414"/>
+  <rect x="126" y="29" width="14" height="12" rx="1" fill="#2A1414"/>
+  <rect x="242" y="29" width="14" height="12" rx="1" fill="#163920"/>
+  <rect x="258" y="29" width="14" height="12" rx="1" fill="#163920"/>
+  <rect x="274" y="29" width="14" height="12" rx="1" fill="#163920"/>
+  <rect x="290" y="29" width="14" height="12" rx="1" fill="#163920"/>
+  <rect x="306" y="29" width="14" height="12" rx="1" fill="#163920"/>
+  <rect x="322" y="29" width="14" height="12" rx="1" fill="#163920"/>
+  <rect x="338" y="29" width="14" height="12" rx="1" fill="#163920"/>
+  <rect x="354" y="29" width="14" height="12" rx="1" fill="#163920"/>
+
+  <!-- Config content -->
+  <!-- SD usage row -->
+  <text x="14" y="64" fill="#F5F8F5" font-size="11" font-family="monospace">SD 1.4GB / 32.0GB</text>
+  <rect x="280" y="56" width="180" height="6" rx="3" fill="#262626"/>
+  <rect x="280" y="56" width="8" height="6" rx="3" fill="#3EE07A"/>
+
+  <!-- FUSO stepper -->
+  <text x="14" y="92" fill="#7A847A" font-size="10" font-family="monospace">FUSO HORARIO</text>
+  <rect x="310" y="80" width="32" height="26" rx="3" fill="#1a1a1a" stroke="#333" stroke-width="1"/>
+  <text x="326" y="97" fill="#F5F8F5" font-size="14" font-family="monospace" text-anchor="middle">-</text>
+  <text x="373" y="97" fill="#F5F8F5" font-size="11" font-family="monospace" text-anchor="middle">UTC-3:00</text>
+  <rect x="430" y="80" width="32" height="26" rx="3" fill="#1a1a1a" stroke="#333" stroke-width="1"/>
+  <text x="446" y="97" fill="#F5F8F5" font-size="14" font-family="monospace" text-anchor="middle">+</text>
+
+  <!-- RAIO DO GATE stepper -->
+  <text x="14" y="122" fill="#7A847A" font-size="10" font-family="monospace">RAIO DO GATE</text>
+  <rect x="310" y="110" width="32" height="26" rx="3" fill="#1a1a1a" stroke="#333" stroke-width="1"/>
+  <text x="326" y="127" fill="#F5F8F5" font-size="14" font-family="monospace" text-anchor="middle">-</text>
+  <text x="373" y="127" fill="#F5F8F5" font-size="11" font-family="monospace" text-anchor="middle">15m</text>
+  <rect x="430" y="110" width="32" height="26" rx="3" fill="#1a1a1a" stroke="#333" stroke-width="1"/>
+  <text x="446" y="127" fill="#F5F8F5" font-size="14" font-family="monospace" text-anchor="middle">+</text>
+
+  <!-- MIN VOLTA stepper -->
+  <text x="14" y="152" fill="#7A847A" font-size="10" font-family="monospace">MIN VOLTA</text>
+  <rect x="310" y="140" width="32" height="26" rx="3" fill="#1a1a1a" stroke="#333" stroke-width="1"/>
+  <text x="326" y="157" fill="#F5F8F5" font-size="14" font-family="monospace" text-anchor="middle">-</text>
+  <text x="373" y="157" fill="#F5F8F5" font-size="11" font-family="monospace" text-anchor="middle">10s</text>
+  <rect x="430" y="140" width="32" height="26" rx="3" fill="#1a1a1a" stroke="#333" stroke-width="1"/>
+  <text x="446" y="157" fill="#F5F8F5" font-size="14" font-family="monospace" text-anchor="middle">+</text>
+
+  <!-- USB button -->
+  <rect x="14" y="170" width="452" height="36" rx="3" fill="#1a1a1a" stroke="#333" stroke-width="1"/>
+  <text x="240" y="192" fill="#F5F8F5" font-size="11" font-family="monospace" text-anchor="middle">Modo pen drive (USB)</text>
+
+  <!-- WiFi button -->
+  <rect x="14" y="212" width="452" height="36" rx="3" fill="#1a1a1a" stroke="#333" stroke-width="1"/>
+  <text x="240" y="234" fill="#F5F8F5" font-size="11" font-family="monospace" text-anchor="middle">Ativar WiFi export</text>
+
+  <!-- Tab bar -->
+  <rect x="0" y="280" width="480" height="40" fill="#000"/>
+  <line x1="0" y1="280" x2="480" y2="280" stroke="#262626" stroke-width="1"/>
+  <line x1="160" y1="280" x2="160" y2="320" stroke="#262626" stroke-width="1"/>
+  <line x1="320" y1="280" x2="320" y2="320" stroke="#262626" stroke-width="1"/>
+  <text x="80"  y="306" fill="#7A847A" font-size="11" font-family="monospace" text-anchor="middle">CORRIDA</text>
+  <text x="240" y="306" fill="#7A847A" font-size="11" font-family="monospace" text-anchor="middle">VOLTAS</text>
+  <text x="400" y="306" fill="#3EE07A" font-size="11" font-family="monospace" text-anchor="middle" font-weight="bold">CONFIG</text>
+
+  <!-- scroll indicator -->
+  <rect x="472" y="100" width="4" height="80" rx="2" fill="#262626"/>
+  <rect x="472" y="100" width="4" height="30" rx="2" fill="#3EE07A"/>
+</svg>
+</div>
+<div class="screen-caption">Aba CONFIG — parte superior (role para baixo para ver campos de texto)</div>
+
+<!-- MOCKUP CONFIG (baixo: campos de texto + delete) -->
+<div class="screen-wrap">
+<svg width="480" height="320" viewBox="0 0 480 320" xmlns="http://www.w3.org/2000/svg" style="background:#000">
+  <!-- Status bar -->
+  <rect width="480" height="24" fill="#000"/>
+  <line x1="0" y1="24" x2="480" y2="24" stroke="#262626" stroke-width="1"/>
+  <circle cx="20" cy="12" r="4" fill="#3EE07A"/>
+  <text x="30" y="16" fill="#7A847A" font-size="10" font-family="monospace">GPS 8</text>
+  <rect x="207" y="4" width="66" height="16" rx="8" fill="#163920"/>
+  <text x="240" y="15.5" fill="#3EE07A" font-size="10" font-family="monospace" text-anchor="middle">QUALY</text>
+  <circle cx="404" cy="12" r="4" fill="#7A847A"/>
+  <text x="418" y="16" fill="#7A847A" font-size="10" font-family="monospace">BLE</text>
+  <rect x="0" y="24" width="480" height="22" fill="#000"/>
+  <rect x="237" y="27" width="2" height="16" fill="#262626"/>
+  <rect x="14"  y="29" width="14" height="12" rx="1" fill="#2A1414"/>
+  <rect x="30"  y="29" width="14" height="12" rx="1" fill="#2A1414"/>
+  <rect x="46"  y="29" width="14" height="12" rx="1" fill="#2A1414"/>
+  <rect x="62"  y="29" width="14" height="12" rx="1" fill="#2A1414"/>
+  <rect x="78"  y="29" width="14" height="12" rx="1" fill="#2A1414"/>
+  <rect x="94"  y="29" width="14" height="12" rx="1" fill="#2A1414"/>
+  <rect x="110" y="29" width="14" height="12" rx="1" fill="#2A1414"/>
+  <rect x="126" y="29" width="14" height="12" rx="1" fill="#2A1414"/>
+  <rect x="242" y="29" width="14" height="12" rx="1" fill="#163920"/>
+  <rect x="258" y="29" width="14" height="12" rx="1" fill="#163920"/>
+  <rect x="274" y="29" width="14" height="12" rx="1" fill="#163920"/>
+  <rect x="290" y="29" width="14" height="12" rx="1" fill="#163920"/>
+  <rect x="306" y="29" width="14" height="12" rx="1" fill="#163920"/>
+  <rect x="322" y="29" width="14" height="12" rx="1" fill="#163920"/>
+  <rect x="338" y="29" width="14" height="12" rx="1" fill="#163920"/>
+  <rect x="354" y="29" width="14" height="12" rx="1" fill="#163920"/>
+
+  <!-- Config content (scrolled down) -->
+  <!-- Delete btn -->
+  <rect x="14" y="50" width="452" height="36" rx="3" fill="#2A1414" stroke="#FF5A5A" stroke-width="1"/>
+  <text x="240" y="72" fill="#FF5A5A" font-size="11" font-family="monospace" text-anchor="middle">Apagar tudo (SD)</text>
+
+  <!-- BLE status row -->
+  <text x="14" y="108" fill="#7A847A" font-size="10" font-family="monospace">BLE telemetria</text>
+  <text x="466" y="108" fill="#3EE07A" font-size="10" font-family="monospace" text-anchor="end">conectado</text>
+
+  <!-- NOME BLE textarea -->
+  <text x="14" y="130" fill="#7A847A" font-size="10" font-family="monospace">NOME BLE</text>
+  <rect x="14" y="136" width="452" height="34" rx="3" fill="#0d0d0d" stroke="#333" stroke-width="1"/>
+  <text x="24" y="158" fill="#F5F8F5" font-size="11" font-family="monospace">KartBox</text>
+  <line x1="90" y1="142" x2="90" y2="164" stroke="#3EE07A" stroke-width="1" opacity="0.8"/>
+
+  <!-- SENHA WIFI textarea -->
+  <text x="14" y="188" fill="#7A847A" font-size="10" font-family="monospace">SENHA WIFI</text>
+  <rect x="14" y="194" width="452" height="34" rx="3" fill="#0d0d0d" stroke="#333" stroke-width="1"/>
+  <text x="24" y="216" fill="#F5F8F5" font-size="11" font-family="monospace">kart2026race</text>
+
+  <!-- wifi note -->
+  <text x="14" y="242" fill="#7A847A" font-size="10" font-family="monospace">min 8 chars  /  BLE: reinicie pra aplicar</text>
+
+  <!-- Tab bar -->
+  <rect x="0" y="280" width="480" height="40" fill="#000"/>
+  <line x1="0" y1="280" x2="480" y2="280" stroke="#262626" stroke-width="1"/>
+  <line x1="160" y1="280" x2="160" y2="320" stroke="#262626" stroke-width="1"/>
+  <line x1="320" y1="280" x2="320" y2="320" stroke="#262626" stroke-width="1"/>
+  <text x="80"  y="306" fill="#7A847A" font-size="11" font-family="monospace" text-anchor="middle">CORRIDA</text>
+  <text x="240" y="306" fill="#7A847A" font-size="11" font-family="monospace" text-anchor="middle">VOLTAS</text>
+  <text x="400" y="306" fill="#3EE07A" font-size="11" font-family="monospace" text-anchor="middle" font-weight="bold">CONFIG</text>
+  <!-- scroll indicator -->
+  <rect x="472" y="100" width="4" height="80" rx="2" fill="#262626"/>
+  <rect x="472" y="150" width="4" height="30" rx="2" fill="#3EE07A"/>
+</svg>
+</div>
+<div class="screen-caption">Aba CONFIG — parte inferior (após rolar). Campo NOME BLE com cursor ativo.</div>
+
+<h3>Referência das configurações</h3>
+<table>
+  <tr><th>Configuração</th><th>Descrição</th><th>Faixa</th><th>Padrão</th></tr>
+  <tr><td>FUSO HORARIO</td><td>Offset UTC em minutos, usado nos nomes dos arquivos de sessão. Passo: 15 min.</td><td>±12h</td><td>UTC-3 (Brasília)</td></tr>
+  <tr><td>RAIO DO GATE</td><td>Raio em metros para considerar "cruzou a linha". Passo: 1 m. GPS de consumo tem ~3–5 m de erro, não desça abaixo de 10 m.</td><td>5–30 m</td><td>15 m</td></tr>
+  <tr><td>MIN VOLTA</td><td>Tempo mínimo entre cruzamentos para ser contado como volta. Evita falsos positivos ao passar perto da linha lentamente. Passo: 1 s.</td><td>5–120 s</td><td>10 s</td></tr>
+  <tr><td>NOME BLE</td><td>Nome do dispositivo visível nos apps de telemetria. Salva na NVS; <strong>reinício necessário</strong> para o novo nome ser anunciado.</td><td>até 31 chars</td><td>KartBox</td></tr>
+  <tr><td>SENHA WIFI</td><td>Senha do ponto de acesso WiFi criado durante o export. Mínimo 8 caracteres (padrão WPA2).</td><td>8–63 chars</td><td>kart2026race</td></tr>
+</table>
+
+<h3>Editar nome BLE / senha WiFi</h3>
+<ol class="steps">
+  <li><span class="step-num">1</span>Role a aba CONFIG para baixo até ver os campos <strong>NOME BLE</strong> e <strong>SENHA WIFI</strong>.</li>
+  <li><span class="step-num">2</span>Toque no campo desejado — o teclado LVGL aparece sobreposto na parte inferior da tela.</li>
+  <li><span class="step-num">3</span>Edite o texto e pressione ✓ para salvar. O valor é gravado na NVS imediatamente.</li>
+  <li><span class="step-num">4</span>Pressione ✕ para cancelar sem salvar.</li>
+</ol>
+
+<h3>Apagar tudo (SD)</h3>
+<div class="box red">
+  <div class="box-label">Ação destrutiva — sem recuperação</div>
+  O botão vermelho apaga <strong>todos os arquivos CSV</strong> do cartão. Por segurança, exige <strong>dois toques</strong>: o primeiro muda o texto para "Toque de novo pra confirmar" e inicia um timer de 3 segundos. Se não confirmar nesse intervalo, o botão volta ao estado original automaticamente.
+</div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════ 6. FLUXO -->
+<section id="fluxo">
+<h2>06 · Fluxo completo de sessão</h2>
+
+<div class="screen-wrap">
+<svg width="480" height="200" viewBox="0 0 480 200" xmlns="http://www.w3.org/2000/svg" style="background:#000; border-radius:6px">
+  <!-- nodes -->
+  <!-- Idle -->
+  <rect x="10" y="80" width="80" height="40" rx="4" fill="#1a1a1a" stroke="#333" stroke-width="1"/>
+  <text x="50" y="105" fill="#7A847A" font-size="10" font-family="monospace" text-anchor="middle">IDLE</text>
+
+  <!-- arrow Idle→SET LINE -->
+  <line x1="90" y1="100" x2="120" y2="100" stroke="#333" stroke-width="1" marker-end="url(#arr)"/>
+  <text x="104" y="92" fill="#7A847A" font-size="8" font-family="monospace" text-anchor="middle">SET LINE</text>
+
+  <!-- Gate -->
+  <rect x="120" y="68" width="88" height="64" rx="4" fill="#1a1a1a" stroke="#3EE07A" stroke-width="1"/>
+  <text x="164" y="90" fill="#7A847A" font-size="9" font-family="monospace" text-anchor="middle">GATE</text>
+  <text x="164" y="105" fill="#3EE07A" font-size="9" font-family="monospace" text-anchor="middle">definido</text>
+  <text x="164" y="120" fill="#7A847A" font-size="8" font-family="monospace" text-anchor="middle">(persiste)</text>
+
+  <!-- arrow Gate→Recording -->
+  <line x1="208" y1="100" x2="238" y2="100" stroke="#333" stroke-width="1" marker-end="url(#arr)"/>
+  <text x="222" y="92" fill="#7A847A" font-size="8" font-family="monospace" text-anchor="middle">RESET tap</text>
+
+  <!-- Recording -->
+  <rect x="238" y="68" width="100" height="64" rx="4" fill="#1a1a1a" stroke="#FF5A5A" stroke-width="1"/>
+  <text x="288" y="90" fill="#7A847A" font-size="9" font-family="monospace" text-anchor="middle">GRAVANDO</text>
+  <circle cx="288" cy="107" r="4" fill="#FF5A5A"/>
+  <text x="305" y="111" fill="#FF5A5A" font-size="9" font-family="monospace">REC</text>
+
+  <!-- arrow Recording→done -->
+  <line x1="338" y1="100" x2="368" y2="100" stroke="#333" stroke-width="1" marker-end="url(#arr)"/>
+  <text x="353" y="90" fill="#7A847A" font-size="7" font-family="monospace" text-anchor="middle">RESET hold</text>
+  <text x="353" y="99" fill="#7A847A" font-size="7" font-family="monospace" text-anchor="middle">1,5 s</text>
+
+  <!-- Done -->
+  <rect x="368" y="80" width="100" height="40" rx="4" fill="#1a1a1a" stroke="#333" stroke-width="1"/>
+  <text x="418" y="98" fill="#7A847A" font-size="10" font-family="monospace" text-anchor="middle">SESSÃO</text>
+  <text x="418" y="112" fill="#3EE07A" font-size="10" font-family="monospace" text-anchor="middle">SALVA</text>
+
+  <!-- arrow down: voltas during recording -->
+  <text x="288" y="155" fill="#3EE07A" font-size="9" font-family="monospace" text-anchor="middle">GPS cruza gate</text>
+  <text x="288" y="168" fill="#7A847A" font-size="9" font-family="monospace" text-anchor="middle">→ volta fechada → flash → CSV</text>
+  <line x1="288" y1="132" x2="288" y2="148" stroke="#262626" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <!-- arrow: pode regravar -->
+  <path d="M418 120 Q418 170 288 170" stroke="#262626" stroke-width="1" fill="none" stroke-dasharray="4,3" marker-end="url(#arr2)"/>
+  <text x="380" y="165" fill="#262626" font-size="8" font-family="monospace">nova sessão</text>
+
+  <defs>
+    <marker id="arr" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L6,3 z" fill="#333"/>
+    </marker>
+    <marker id="arr2" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L6,3 z" fill="#262626"/>
+    </marker>
+  </defs>
+</svg>
+</div>
+
+<ol class="steps">
+  <li><span class="step-num">1</span><strong>Defina o gate</strong> — posicione o kart na linha e pressione SET LINE. Só precisa fazer isso uma vez por pista.</li>
+  <li><span class="step-num">2</span><strong>Inicie a sessão</strong> — pressione RESET uma vez. O ponto REC fica vermelho na status bar. Cada arquivo tem nome com data/hora local (ex: <code>20250620_103015.csv</code>).</li>
+  <li><span class="step-num">3</span><strong>Pilote</strong> — a cada cruzamento da linha o KartBox fecha a volta, atualiza a tela, pisca o overlay e grava a linha no CSV.</li>
+  <li><span class="step-num">4</span><strong>Encerre</strong> — segure RESET por 1,5 s. O arquivo é fechado com segurança (flush + fclose). O ponto REC apaga.</li>
+  <li><span class="step-num">5</span><strong>Leia os dados</strong> — use a aba VOLTAS para ver o resumo na tela, ou exporte via WiFi / USB para análise completa.</li>
+</ol>
+
+<div class="box blue">
+  <div class="box-label">Sem cartão SD</div>
+  O KartBox funciona mesmo sem SD — a tela e a telemetria BLE continuam normais. Só a gravação é desabilitada. O aviso aparece no log serial durante o boot.
+</div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════ 7. BLE -->
+<section id="ble">
+<h2>07 · Telemetria BLE ao vivo</h2>
+
+<p>O KartBox anuncia continuamente via BLE (NimBLE) a 10 Hz. Um app no celular ou tablet pode receber velocidade, posição, volta atual e delta em tempo real — sem precisar tocar na tela do KartBox.</p>
+
+<!-- MOCKUP: status bar com BLE conectado -->
+<div class="screen-wrap">
+<svg width="480" height="60" viewBox="0 0 480 60" xmlns="http://www.w3.org/2000/svg" style="background:#000; border-radius:6px">
+  <rect width="480" height="24" fill="#000"/>
+  <line x1="0" y1="24" x2="480" y2="24" stroke="#262626" stroke-width="1"/>
+  <circle cx="20" cy="12" r="4" fill="#3EE07A"/>
+  <text x="30" y="16" fill="#7A847A" font-size="10" font-family="monospace">GPS 9</text>
+  <rect x="207" y="4" width="60" height="16" rx="8" fill="#2A1414"/>
+  <text x="237" y="15.5" fill="#FF5A5A" font-size="10" font-family="monospace" text-anchor="middle">RACE</text>
+  <circle cx="404" cy="12" r="4" fill="#FF5A5A"/>
+  <text x="418" y="16" fill="#5FB8E8" font-size="10" font-family="monospace">BLE</text>
+  <!-- BLE indicator detail -->
+  <text x="14" y="46" fill="#7A847A" font-size="10" font-family="monospace">↑ BLE azul = conectado    ↑ REC vermelho = gravando    ↑ modo RACE</text>
+</svg>
+</div>
+<div class="screen-caption">Status bar — sessão RACE ativa, BLE conectado</div>
+
+<table>
+  <tr><th>Indicador</th><th>Estado</th></tr>
+  <tr><td style="color:var(--blue)">BLE azul</td><td>Cliente conectado e recebendo telemetria</td></tr>
+  <tr><td style="color:var(--muted)">BLE cinza</td><td>Anunciando, sem cliente conectado</td></tr>
+</table>
+
+<div class="box blue">
+  <div class="box-label">Nome do dispositivo</div>
+  Por padrão o dispositivo aparece como <strong>KartBox</strong>. Mude na aba CONFIG → campo <strong>NOME BLE</strong>. A alteração só aparece após reiniciar o dispositivo (a NVS é gravada imediatamente, mas o anúncio BLE só muda no próximo boot).
+</div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════ 8. WIFI -->
+<section id="wifi">
+<h2>08 · Exportar via WiFi</h2>
+
+<p>O KartBox cria um ponto de acesso WiFi sob demanda para servir os arquivos CSV. O WiFi <strong>não fica ligado o tempo todo</strong> — só quando você pede, para não disputar CPU e rádio com a gravação.</p>
+
+<!-- MOCKUP CONFIG WiFi ativo -->
+<div class="screen-wrap">
+<svg width="480" height="200" viewBox="0 0 480 200" xmlns="http://www.w3.org/2000/svg" style="background:#000; border-radius:6px">
+  <!-- WiFi btn ativo -->
+  <rect x="14" y="20" width="452" height="36" rx="3" fill="#163920" stroke="#3EE07A" stroke-width="1"/>
+  <text x="240" y="42" fill="#3EE07A" font-size="11" font-family="monospace" text-anchor="middle">Desligar WiFi export</text>
+
+  <!-- WiFi info -->
+  <text x="14" y="76" fill="#3EE07A" font-size="11" font-family="monospace">KartBox-A4E2  /  kart2026race  /  192.168.4.1</text>
+
+  <!-- info box -->
+  <rect x="14" y="100" width="452" height="80" rx="3" fill="#080f14" stroke="#1a3040" stroke-width="1"/>
+  <text x="24" y="122" fill="#5FB8E8" font-size="10" font-family="monospace">1. Conecte seu celular no WiFi: KartBox-A4E2</text>
+  <text x="24" y="140" fill="#5FB8E8" font-size="10" font-family="monospace">2. Senha: kart2026race</text>
+  <text x="24" y="158" fill="#5FB8E8" font-size="10" font-family="monospace">3. Acesse: http://192.168.4.1</text>
+  <text x="24" y="176" fill="#7A847A" font-size="10" font-family="monospace">   (se desligar o WiFi aparece sozinho em 5 min sem acesso)</text>
+</svg>
+</div>
+<div class="screen-caption">Aba CONFIG — WiFi export ativo. Informações de conexão aparecem na tela.</div>
+
+<ol class="steps">
+  <li><span class="step-num">1</span>Encerre a sessão (WiFi é bloqueado durante gravação para não afetar a performance).</li>
+  <li><span class="step-num">2</span>Na aba CONFIG, toque em <strong>Ativar WiFi export</strong>. O botão muda de texto e aparecem o SSID, senha e IP.</li>
+  <li><span class="step-num">3</span>Conecte o celular no WiFi cujo nome começa com <code>KartBox-</code>.</li>
+  <li><span class="step-num">4</span>Acesse <code>http://192.168.4.1</code> no navegador para baixar os arquivos CSV.</li>
+  <li><span class="step-num">5</span>Quando terminar, toque em <strong>Desligar WiFi export</strong>. O AP também desliga sozinho após 5 minutos sem acesso (proteção automática).</li>
+</ol>
+
+<div class="box gold">
+  <div class="box-label">Mudar a senha</div>
+  Na aba CONFIG, role para baixo e edite o campo <strong>SENHA WIFI</strong>. O novo valor é gravado na NVS e usado na próxima vez que ativar o WiFi export. Mínimo de 8 caracteres (padrão WPA2).
+</div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════ 9. USB -->
+<section id="usb">
+<h2>09 · Modo pen drive (USB)</h2>
+
+<p>Transforma o KartBox em um pen drive — o SD aparece como volume no computador. Permite arrastar os CSVs sem precisar retirar o cartão do slot.</p>
+
+<div class="box red">
+  <div class="box-label">Exclusão mútua obrigatória</div>
+  O barramento SDMMC só tem um dono por vez. Ao entrar no modo USB, o firmware <strong>desmonta completamente</strong> o SD antes de entregá-lo ao host. Toda gravação e leitura pelo firmware para enquanto o USB estiver ativo. Ao sair, o SD é remontado automaticamente.
+</div>
+
+<ol class="steps">
+  <li><span class="step-num">1</span>Conecte o cabo USB ao computador.</li>
+  <li><span class="step-num">2</span>Encerre qualquer sessão ativa (modo USB é bloqueado durante gravação).</li>
+  <li><span class="step-num">3</span>Na aba CONFIG, toque em <strong>Modo pen drive (USB)</strong>. O SD aparece como volume removível no SO.</li>
+  <li><span class="step-num">4</span>Copie ou exclua os arquivos pelo computador normalmente.</li>
+  <li><span class="step-num">5</span>No computador, ejete o volume com segurança. Depois toque <strong>Encerrar modo pen drive</strong> na tela — o SD é remontado e o KartBox volta ao funcionamento normal.</li>
+</ol>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════ 10. MODOS -->
+<section id="modos">
+<h2>10 · Modos QUALY vs CORRIDA</h2>
+
+<p>O botão MODE físico alterna entre os dois modos. Só pode ser mudado com sessão parada.</p>
+
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin:20px 0">
+  <div class="box green">
+    <div class="box-label" style="color:var(--green)">QUALY</div>
+    <p style="margin:0;font-size:13px;color:#c0c8c0">O timing começa <strong>imediatamente</strong> ao cruzar a linha pela primeira vez. Ideal para treino livre onde você parte do pit sem largada formal.</p>
+  </div>
+  <div class="box red">
+    <div class="box-label" style="color:var(--red)">CORRIDA (RACE)</div>
+    <p style="margin:0;font-size:13px;color:#c0c8c0">O timing só começa quando o kart ultrapassa <strong>5 km/h</strong> após cruzar a linha. Evita contar o tempo parado no grid esperando a largada.</p>
+  </div>
+</div>
+
+<p>O modo atual é exibido na <strong>pílula central</strong> da status bar:</p>
+<div class="legend">
+  <div class="legend-item"><div style="width:50px;height:16px;border-radius:8px;background:var(--green-dim);display:flex;align-items:center;justify-content:center;font-size:9px;color:var(--green)">QUALY</div> Fundo verde</div>
+  <div class="legend-item"><div style="width:50px;height:16px;border-radius:8px;background:var(--red-dim);display:flex;align-items:center;justify-content:center;font-size:9px;color:var(--red)">RACE</div> Fundo vermelho</div>
+</div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════ 11. INDICADORES -->
+<section id="indicadores">
+<h2>11 · Referência de Indicadores</h2>
+
+<h3>Status bar (linha do topo)</h3>
+<table>
+  <tr><th>Indicador</th><th>Verde / Azul</th><th>Cinza / Apagado</th></tr>
+  <tr><td>● GPS N</td><td>Fix válido, N satélites</td><td>Sem fix (posição inválida)</td></tr>
+  <tr><td>Pílula central</td><td>QUALY (verde)</td><td>RACE (vermelho)</td></tr>
+  <tr><td>● REC</td><td style="color:var(--red)">Vermelho = sessão gravando</td><td>Sessão parada</td></tr>
+  <tr><td>BLE</td><td style="color:var(--blue)">Azul = cliente conectado</td><td>Sem cliente BLE</td></tr>
+</table>
+
+<h3>Arquivo CSV — colunas</h3>
+<p>Cada sessão gera um arquivo com cabeçalho e uma linha por amostra de GPS (~10 Hz):</p>
+<table>
+  <tr><th>Coluna</th><th>Tipo</th><th>Descrição</th></tr>
+  <tr><td>t_ms</td><td>uint32</td><td>Milissegundos desde o início da sessão</td></tr>
+  <tr><td>lat / lon</td><td>double</td><td>Latitude e longitude em graus decimais</td></tr>
+  <tr><td>speed_kmh</td><td>float</td><td>Velocidade GPS instantânea</td></tr>
+  <tr><td>heading_deg</td><td>float</td><td>Direção de movimento (0°=Norte, 90°=Leste)</td></tr>
+  <tr><td>sats</td><td>uint8</td><td>Satélites usados no fix</td></tr>
+  <tr><td>lap</td><td>uint32</td><td>Número da volta atual</td></tr>
+  <tr><td>lap_time_ms</td><td>uint32</td><td>Tempo decorrido na volta atual em ms</td></tr>
+  <tr><td>best_lap_ms</td><td>uint32</td><td>Melhor volta da sessão em ms (0 se ainda não tem)</td></tr>
+  <tr><td>delta_ms</td><td>int32</td><td>Delta da última volta fechada vs best anterior (negativo = mais rápido)</td></tr>
+</table>
+
+<div class="box green">
+  <div class="box-label">Análise externa</div>
+  Com o CSV em mãos, ferramentas como <strong>RaceChronoPro</strong>, <strong>Python/pandas</strong> ou mesmo Excel permitem traçar mapa de pista (lat/lon), análise de setor, velocidade por trecho e comparação de voltas com granularidade de 100 ms.
+</div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════ FOOTER -->
+<div style="text-align:center; padding-top:48px; border-top:1px solid var(--border); color:var(--muted); font-size:11px; letter-spacing:2px">
+  KARTBOX v2 &nbsp;·&nbsp; ESP32 + LVGL &nbsp;·&nbsp; GPS NMEA &nbsp;·&nbsp; 2025
+</div>
+
+</div><!-- /page -->
+</body>
+</html>

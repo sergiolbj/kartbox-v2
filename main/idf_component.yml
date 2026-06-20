@@ -1,0 +1,17 @@
+## Dependências externas do KartBox v2 (baixadas automaticamente pelo idf.py build)
+## Componentes built-in do ESP-IDF NÃO entram aqui.
+
+dependencies:
+  idf: ">=5.3"
+
+  # Driver MIPI-DSI do painel ST7701S (480×800)
+  # https://components.espressif.com/components/espressif/esp_lcd_st7701
+  espressif/esp_lcd_st7701: "^1.0.0"
+
+  # Driver de touch GT911 via I2C
+  # https://components.espressif.com/components/espressif/esp_lcd_touch_gt911
+  espressif/esp_lcd_touch_gt911: "^1.0.0"
+
+  # Port do LVGL para ESP-IDF (puxa lvgl como sub-dependência)
+  # https://components.espressif.com/components/espressif/esp_lvgl_port
+  espressif/esp_lvgl_port: "^2.3.0"

@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>KartBox v2 — Pinagem</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0a0a0a;
+    color: #e8ece8;
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    padding: 40px 32px 64px;
+    max-width: 780px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 22px; color: #3EE07A; margin-bottom: 4px; }
+  .sub { color: #7A847A; font-size: 11px; letter-spacing: 2px; margin-bottom: 40px; }
+
+  h2 {
+    font-size: 10px;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    color: #3EE07A;
+    margin: 36px 0 12px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #163920;
+  }
+
+  table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+  th {
+    text-align: left;
+    padding: 7px 12px;
+    color: #7A847A;
+    font-weight: 400;
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    border-bottom: 1px solid #1e1e1e;
+  }
+  td { padding: 9px 12px; border-bottom: 1px solid #111; color: #c0c8c0; vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  td:first-child { color: #3EE07A; white-space: nowrap; font-weight: 600; }
+  td:nth-child(2) { color: #F5F8F5; white-space: nowrap; }
+
+  .note {
+    margin-top: 10px;
+    padding: 10px 14px;
+    background: #0b1a10;
+    border: 1px solid #163920;
+    border-radius: 4px;
+    color: #7A847A;
+    font-size: 12px;
+  }
+  .note strong { color: #c0c8c0; }
+
+  .warn {
+    margin-top: 10px;
+    padding: 10px 14px;
+    background: #110f00;
+    border: 1px solid #3a3000;
+    border-radius: 4px;
+    color: #7A847A;
+    font-size: 12px;
+  }
+  .warn strong { color: #FFD700; }
+
+  footer { margin-top: 48px; color: #333; font-size: 11px; letter-spacing: 2px; }
+</style>
+</head>
+<body>
+
+<h1>KartBox v2 — Pinagem</h1>
+<div class="sub">GUITION JC4880P443C_I_W &nbsp;·&nbsp; ESP32-P4 + ESP32-C6 &nbsp;·&nbsp; config.h + display_init.h</div>
+
+<!-- DISPLAY -->
+<h2>Display &amp; Touch</h2>
+<table>
+  <tr><th>Sinal</th><th>GPIO</th><th>Descrição</th></tr>
+  <tr><td>LCD_RESET</td><td>GPIO 5</td><td>Reset do painel ST7701S (compartilhado com touch GT911)</td></tr>
+  <tr><td>LCD_BL (PWM)</td><td>GPIO 23</td><td>Backlight via LEDC. Começa desligado — chame display_backlight_on() após ui_init()</td></tr>
+  <tr><td>I2C SDA</td><td>GPIO 7</td><td>Barramento I2C_NUM_1 — touch GT911 e expansões (MPU6050, etc.)</td></tr>
+  <tr><td>I2C SCL</td><td>GPIO 8</td><td>Barramento I2C_NUM_1</td></tr>
+  <tr><td>MIPI-DSI PHY</td><td>LDO canal 3 @ 2500 mV</td><td>Alimentação do PHY MIPI-DSI — configurado em display_init_start()</td></tr>
+</table>
+<div class="warn"><strong>I2C compartilhado:</strong> GPIO 7/8 são usados pelo touch GT911 e por qualquer sensor externo (ex: MPU6050). Use display_get_i2c_bus() para adicionar dispositivos ao mesmo handle. Nunca crie um segundo i2c_master_bus_config_t nos mesmos pinos — conflito silencioso.</div>
+
+<!-- BOTÕES -->
+<h2>Botões Físicos</h2>
+<table>
+  <tr><th>Botão</th><th>GPIO</th><th>Ação</th></tr>
+  <tr><td>BTN_MODE</td><td>GPIO 33</td><td>Alterna QUALY / CORRIDA (só com sessão parada)</td></tr>
+  <tr><td>BTN_SETLINE</td><td>GPIO 31</td><td>Marca posição + heading atual como linha de chegada</td></tr>
+  <tr><td>BTN_RESET</td><td>GPIO 30</td><td>Tap: inicia sessão &nbsp;·&nbsp; Hold 1500 ms: encerra sessão</td></tr>
+</table>
+<div class="note">Wiring assumido: <strong>momentâneo para GND, pull-up interno, ativo em LOW</strong>. Se a lógica vier invertida na bancada, ajuste apenas em app_events.c (um lugar só).<br>Debounce: <strong>40 ms</strong>.</div>
+
+<!-- GPS -->
+<h2>GPS (UART NMEA)</h2>
+<table>
+  <tr><th>Sinal</th><th>GPIO / Config</th><th>Descrição</th></tr>
+  <tr><td>UART</td><td>UART_NUM_1</td><td>Periférico UART dedicado ao GPS</td></tr>
+  <tr><td>TX (ESP→GPS)</td><td>GPIO 52</td><td>Saída do ESP — entrada do módulo GPS</td></tr>
+  <tr><td>RX (GPS→ESP)</td><td>GPIO 51</td><td>Entrada do ESP — saída NMEA do módulo GPS</td></tr>
+  <tr><td>Baud rate</td><td>9600 bps</td><td>Padrão NMEA. Altere GPS_BAUD_RATE em config.h se o módulo usar 38400/115200</td></tr>
+  <tr><td>Buffer RX</td><td>1024 bytes</td><td>GPS_RX_BUF_SIZE em config.h</td></tr>
+</table>
+
+<!-- SD -->
+<h2>Cartão SD (SDMMC 4-bit)</h2>
+<table>
+  <tr><th>Sinal</th><th>GPIO</th><th>Descrição</th></tr>
+  <tr><td>CLK</td><td>GPIO 43</td><td>Clock SDMMC</td></tr>
+  <tr><td>CMD</td><td>GPIO 44</td><td>Comando</td></tr>
+  <tr><td>D0</td><td>GPIO 39</td><td>Dado — bit 0</td></tr>
+  <tr><td>D1</td><td>GPIO 40</td><td>Dado — bit 1</td></tr>
+  <tr><td>D2</td><td>GPIO 41</td><td>Dado — bit 2</td></tr>
+  <tr><td>D3</td><td>GPIO 42</td><td>Dado — bit 3</td></tr>
+  <tr><td>SD_PWR_EN</td><td>GPIO 45</td><td>Habilita VCC do slot via transistor. <strong>Ativo em HIGH</strong> (assumido). Inverta gpio_set_level() em sd_logger.c se não montar.</td></tr>
+  <tr><td>LDO</td><td>Canal 4 @ 3300 mV</td><td>Regulador LDO interno do ESP32-P4 para alimentar o slot SD</td></tr>
+</table>
+<div class="note">Ponto de montagem: <strong>/sdcard</strong> &nbsp;·&nbsp; Sessões em: <strong>/sdcard/sessions/</strong> &nbsp;·&nbsp; Pull-ups internos habilitados via SDMMC_SLOT_FLAG_INTERNAL_PULLUP.</div>
+
+<!-- RESUMO RÁPIDO -->
+<h2>Resumo rápido</h2>
+<table>
+  <tr><th>Subsistema</th><th>Pinos</th></tr>
+  <tr><td>Display / Touch</td><td>GPIO 5, 7, 8, 23 · LDO 3 @ 2500 mV</td></tr>
+  <tr><td>Botões</td><td>GPIO 30, 31, 33</td></tr>
+  <tr><td>GPS UART</td><td>GPIO 51 (RX), 52 (TX)</td></tr>
+  <tr><td>SD SDMMC 4-bit</td><td>GPIO 39–44 · GPIO 45 (PWR) · LDO 4 @ 3300 mV</td></tr>
+  <tr><td>BLE</td><td>Interno (NimBLE via ESP32-C6 — sem pino externo)</td></tr>
+  <tr><td>WiFi AP</td><td>Interno (ESP32-C6 — sem pino externo)</td></tr>
+  <tr><td>USB MSC</td><td>Interno (ESP32-P4 USB-OTG — sem pino extra além do cabo)</td></tr>
+</table>
+
+<footer>KARTBOX v2 &nbsp;·&nbsp; config.h + display_init.h</footer>
+
+</body>
+</html>
