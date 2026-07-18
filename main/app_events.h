@@ -26,15 +26,22 @@ extern "C" {
 #endif
 
 typedef enum {
-    APP_EVT_BTN_MODE,        /* alterna QUALY / CORRIDA */
+    APP_EVT_BTN_MODE,         /* TAP no MODE (decidido ao soltar): cicla o layout da tela CORRIDA */
+    APP_EVT_BTN_MODE_PRESSED, /* MODE apertado (antes de saber se e' tap ou hold) - arma a barra de progresso */
+    APP_EVT_BTN_MODE_HELD,    /* segurar MODE: alterna QUALY / CORRIDA */
     APP_EVT_BTN_SETLINE,     /* marca/confirma linha de chegada */
     APP_EVT_BTN_RESET,       /* inicia sessao nova, ou pede confirmacao de encerrar */
     APP_EVT_BTN_RESET_HELD,  /* reset confirmado (segurou o tempo minimo) */
 
     APP_EVT_USB_MODE_TOGGLE, /* botao de tela: entrar/sair do modo pen drive */
-    APP_EVT_WIFI_EXPORT_TOGGLE, /* botao de tela: ligar/desligar AP de export sob demanda */
+    APP_EVT_WIFI_EXPORT_TOGGLE, /* botao de tela: ligar/desligar wifi export sob demanda (AP ou STA, conforme modo atual) */
+    APP_EVT_WIFI_MODE_SET,   /* botao de tela: troca AP<->STA (data.param: 0=AP, 1=STA) - so com wifi desligado */
+    APP_EVT_WIFI_SCAN,       /* botao de tela: escanear redes visiveis (bloqueante alguns segundos) */
+    APP_EVT_WIFI_STA_CONNECT, /* botao de tela: conectar com as credenciais em data.wifi_sta */
+    APP_EVT_BLE_RADIO_TOGGLE, /* switch de tela: ligar/desligar anuncio+conexao BLE */
     APP_EVT_SD_DELETE_ALL,   /* botao de tela: apagar tudo do SD (com confirmacao) */
     APP_EVT_SESSION_SELECT,  /* usuario escolheu uma sessao no dropdown da aba Voltas */
+    APP_EVT_SESSION_MAP,     /* botao "Mapa" na aba Voltas - mostra tracado da sessao selecionada (data.session_index) */
 
     APP_EVT_GPS_SAMPLE,      /* nova amostra de GPS processada (timing+posicao) */
     APP_EVT_LAP_COMPLETE,    /* uma volta fechou - carrega tempo+delta prontos */
@@ -48,10 +55,23 @@ typedef enum {
     APP_EVT_BTN_RESET_HOLD_ABORT, /* RESET solto antes de completar o hold - cancela barra de progresso */
 
     /* Aba PISTA - gestao de configs de pista no SD */
-    APP_EVT_TRACK_LOAD,   /* carregar pista pelo nome (data.track_name) e aplicar ao GPS */
+    APP_EVT_TRACK_LOAD,   /* carregar pista pelo nome (data.track_name), aplicar ao GPS e ir pra CORRIDA (com contagem) */
+    APP_EVT_TRACK_EDIT,   /* igual TRACK_LOAD (aplica ao GPS), mas abre o painel de edicao na propria aba PISTA em vez de navegar */
     APP_EVT_TRACK_SAVE,   /* salvar estado GPS atual como pista (nome vem de ui_get_track_draft) */
     APP_EVT_TRACK_DELETE, /* excluir pista pelo nome (data.track_name) */
     APP_EVT_TRACK_NEW,    /* limpar estado de pista atual (finish + setores) para nova config */
+
+    /* Auto-sessao - postados pelo gps.c quando detecta movimento/parada
+     * sustentados (ver auto_session_check). Mesmas guardas do RESET
+     * manual valem no dispatcher. */
+    APP_EVT_AUTO_SESSION_START,
+    APP_EVT_AUTO_SESSION_STOP,
+
+    /* Backup/restore das configuracoes (NVS <-> arquivo no SD) - botoes
+     * na CONFIG > SISTEMA. I/O de arquivo roda no dispatcher (main),
+     * nunca na taskLVGL. */
+    APP_EVT_CFG_BACKUP,
+    APP_EVT_CFG_RESTORE,
 } app_event_type_t;
 
 typedef enum {
@@ -79,15 +99,23 @@ typedef struct {
     bool     is_new_best;
 } lap_complete_payload_t;
 
+/* p/ APP_EVT_WIFI_STA_CONNECT - credenciais escolhidas na aba Config
+ * (SSID vindo do scan ou digitado a mao, senha do campo de texto). */
+typedef struct {
+    char ssid[33];     /* 32 + \0, limite 802.11 */
+    char password[64];
+} wifi_sta_connect_payload_t;
+
 typedef struct {
     app_event_type_t   type;
     app_event_source_t source;
     union {
-        gps_sample_payload_t   gps;
-        lap_complete_payload_t lap;
-        uint32_t               session_index; /* p/ APP_EVT_SESSION_SELECT */
-        uint32_t               param;         /* generico - p/ SECTOR_MARK/CLEAR: indice */
-        char                   track_name[32]; /* p/ TRACK_LOAD / TRACK_DELETE */
+        gps_sample_payload_t       gps;
+        lap_complete_payload_t     lap;
+        uint32_t                   session_index; /* p/ APP_EVT_SESSION_SELECT */
+        uint32_t                   param;         /* generico - p/ SECTOR_MARK/CLEAR: indice, WIFI_MODE_SET: 0=AP/1=STA */
+        char                       track_name[32]; /* p/ TRACK_LOAD / TRACK_EDIT / TRACK_DELETE */
+        wifi_sta_connect_payload_t wifi_sta;       /* p/ APP_EVT_WIFI_STA_CONNECT */
     } data;
 } app_event_t;
 

@@ -5,7 +5,7 @@
  * em vez de bsp_display_start() da BSP generica da Espressif.
  *
  * Fontes usadas pra validar cada numero abaixo (nada aqui foi chutado):
- *   - Schematic oficial da placa (5-Schematic/*.png, JC4880P443_V1.0.pdf)
+ *   - Schematic oficial da placa (5-Schematic PNGs, JC4880P443_V1.0.pdf)
  *   - Demo funcional do fabricante:
  *     idf_examples/ESP-IDF/lvgl_sw_rotation/main/lvgl_sw_rotation.c
  *     (essa e a fonte da sequencia de init do ST7701S e do video_timing -
@@ -297,7 +297,37 @@ lv_display_t *display_init_start(void)
         return NULL;
     }
 
-    const lvgl_port_cfg_t lvgl_cfg = ESP_LVGL_PORT_INIT_CONFIG();
+    lvgl_port_cfg_t lvgl_cfg = ESP_LVGL_PORT_INIT_CONFIG();
+    /* Default do esp_lvgl_port e' 7168 bytes - baixo demais pro pipeline de
+     * draw da LVGL9 com as fontes maiores da reforma visual (glyphs bold
+     * grandes, blend/layer descriptors na pilha de chamada). Ja estourou
+     * uma vez com "Stack protection fault" dentro de lv_draw_buf_goto_xy
+     * logo no primeiro desenho apos "kartbox v2 pronto" (corrigido subindo
+     * pra 16384, RAM interna).
+     *
+     * FIX REAL (bug grave, ja corrigido uma vez errado): uma tentativa
+     * anterior botou essa pilha em PSRAM (MALLOC_CAP_SPIRAM), raciocinio
+     * na epoca sendo "mais folga de graca, sem custar RAM interna". Isso
+     * e' uma armadilha classica do ESP-IDF: pilha de TASK em PSRAM vira
+     * uma mina terrestre pro sistema inteiro, nao so pra essa task -
+     * toda vez que QUALQUER operacao em qualquer lugar desliga o cache
+     * de flash (nvs_commit(), que settings.c chama a cada mudanca de
+     * config; o proprio driver WiFi persistindo config em NVS depois de
+     * conectar; etc.), o ESP-IDF varre TODAS as tasks do sistema pra
+     * garantir que a pilha de cada uma continua acessivel com o cache
+     * desligado - e a pilha dessa task, em PSRAM, falha esse teste na
+     * hora (PSRAM depende do cache pra ser acessada nesse chip). Resultado:
+     * "assert failed: esp_task_stack_is_sane_cache_disabled" derrubando o
+     * firmware inteiro, visto em campo toda vez que MEXER numa config
+     * numerica (FUSO/GATE/MIN VOLTA, cada +/- chama nvs_commit) OU logo
+     * apos conectar em WiFi STA (o proprio driver commitando a config).
+     * Fix: pilha de volta pra RAM interna (so MALLOC_CAP_8BIT), mesmo
+     * tamanho maior (32768) que a PSRAM permitia - RAM interna do P4 tem
+     * folga pra isso. Heap normal (buffers de dados, NAO pilha de task)
+     * continua liberado pra ir pra PSRAM sem problema - o risco e'
+     * especifico de pilha de execucao, nao de dados. */
+    lvgl_cfg.task_stack = 32768;
+    lvgl_cfg.task_stack_caps = MALLOC_CAP_8BIT;
     if (lvgl_port_init(&lvgl_cfg) != ESP_OK) {
         ESP_LOGE(TAG, "Falha ao iniciar esp_lvgl_port");
         return NULL;

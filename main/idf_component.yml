@@ -15,3 +15,20 @@ dependencies:
   # Port do LVGL para ESP-IDF (puxa lvgl como sub-dependência)
   # https://components.espressif.com/components/espressif/esp_lvgl_port
   espressif/esp_lvgl_port: "^2.3.0"
+
+  # TinyUSB (removido do IDF core no 5.x — agora via component manager)
+  # https://components.espressif.com/components/espressif/esp_tinyusb
+  espressif/esp_tinyusb: "^1.0.0"
+
+  # P4 não tem rádio nativo — WiFi/BT passam pelo C6 coprocessador via SDIO.
+  # esp_wifi_remote precisa do esp_hosted (RPC) pra funcionar.
+  # Depois do build, rodar: idf.py menuconfig -> Component config -> Wi-Fi Remote -> slave target = esp32c6
+  espressif/esp_wifi_remote: "*"
+  espressif/esp_hosted: "*"
+
+  # mDNS ("kartbox.local") — saiu do core do IDF pro component registry
+  # a partir do 5.x. Usado em wifi_export.c pra achar o kartbox sem
+  # precisar saber o IP (util sobretudo no modo STA, onde o IP depende
+  # do roteador do usuario).
+  # https://components.espressif.com/components/espressif/mdns
+  espressif/mdns: "^1.2"

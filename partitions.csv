@@ -1,0 +1,25 @@
+# Name,   Type, SubType, Offset,   Size,  Flags
+# KartBox v2 — board tem 16MB flash, sessoes de GPS ficam no SD card
+# (nao na flash interna).
+#
+# Layout OTA (v2): duas particoes de app (ota_0/ota_1) + otadata. O
+# update via WiFi (POST /ota no wifi_export.c) grava na particao
+# inativa e troca o boot — se a imagem for invalida, esp_ota_end()
+# rejeita antes de trocar; com CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE o
+# bootloader ainda volta sozinho pra versao anterior se o novo app nao
+# confirmar o boot (esp_ota_mark_app_valid em main.c).
+#
+# NVS continua no MESMO offset da tabela antiga (0x9000) de proposito —
+# configuracoes/pistas salvas sobrevivem a migracao. phy_init mudou de
+# lugar (recalibra sozinho, sem perda).
+#
+# ATENCAO: migrar da tabela antiga (factory unica) exige UM ultimo
+# flash por cabo: idf.py flash. Dai em diante, tudo por OTA.
+nvs,      data, nvs,      0x9000,   0x6000,
+otadata,  data, ota,      0xf000,   0x2000,
+phy_init, data, phy,      0x11000,  0x1000,
+ota_0,    app,  ota_0,    0x20000,  0x600000,
+ota_1,    app,  ota_1,    0x620000, 0x600000,
+# Coredump: crash em campo grava aqui; no boot seguinte main.c copia pro
+# SD (coredump_N.elf) e apaga - analise com espcoredump.py sem cabo.
+coredump, data, coredump, 0xC20000, 0x10000,

@@ -21,6 +21,14 @@
 
 static const char *TAG = "track_mgr";
 
+/* Trava em tempo de compilacao: o editor.html (track_editor.html) monta o
+ * mesmo layout de bytes na mao via DataView (offsets 0/4/40/64/88, total
+ * 112 bytes - ver comentario no final do HTML). Se alguem mexer nos campos
+ * de track_config_t sem atualizar o HTML junto, o arquivo gerado no
+ * celular vira lixo silenciosamente. Esse assert pelo menos avisa aqui. */
+_Static_assert(sizeof(track_config_t) == 112,
+    "track_config_t mudou de tamanho - atualize track_editor.html (buildTrkBuffer/applyLoadedBuffer) e wifi_export.c junto");
+
 /* Indice em RAM das pistas encontradas no boot (ou apos save/delete). */
 static char s_names[TRACK_LIST_MAX][TRACK_NAME_MAX];
 static int  s_count = 0;

@@ -236,8 +236,9 @@
   <div class="btn-card">
     <div class="label">Botão 1</div>
     <div class="name">MODE</div>
-    <div class="desc">Alterna entre os modos de corrida. Só funciona com sessão parada.</div>
-    <span class="tap">tap → QUALY ↔ RACE</span>
+    <div class="desc">Tap curto cicla o layout da tela CORRIDA (completo → delta gigante → velocidade gigante) — cada modo lembra o seu layout preferido. Segurar alterna o modo de condução (só com sessão parada).</div>
+    <span class="tap">tap → ciclar layout da tela</span><br>
+    <span class="hold">hold 1 s → QUALY ↔ RACE</span>
   </div>
   <div class="btn-card">
     <div class="label">Botão 2</div>
@@ -257,6 +258,13 @@
 <div class="box blue">
   <div class="box-label">Nota de montagem</div>
   Posicione o KartBox fixo no kart <strong>antes</strong> de marcar a linha — a direção (heading) do GPS no momento do SET LINE define o vetor de cruzamento. Se o dispositivo estiver solto ou girado, o gate vai detectar cruzamentos errados.
+</div>
+
+<div class="box blue">
+  <div class="box-label">Novidades da v1.0-beta (resumo)</div>
+  <strong>Na pista:</strong> auto-sessão (inicia/encerra sozinho pela velocidade) · delta de setor ao vivo colorido · 3 layouts de tela cicláveis (tap no MODE ou toque no centro, preferência salva por modo) · popup de estatísticas ao encerrar (best, média, consistência).
+  <strong>Análise:</strong> comparação de voltas toque-a-toque com setores · mapa com heatmap e visão "melhor volta" · página web de análise (velocidade × distância, mapa sincronizado, insights automáticos, relatório imprimível) · Evolução entre sessões por pista.
+  <strong>Sistema:</strong> atualização OTA pelo navegador com rollback · A-GPS pra fix rápido · 5 temas de cor · brilho ajustável · backup/restore de config no SD · autoteste e diagnóstico RF na CONFIG→SISTEMA · coredump automático pro SD.
 </div>
 </section>
 
@@ -324,51 +332,53 @@
   <rect x="338" y="29" width="14" height="12" rx="1" fill="#163920"/>
   <rect x="354" y="29" width="14" height="12" rx="1" fill="#163920"/>
 
-  <!-- Content area (46 to 280) -->
-  <!-- Left col border -->
-  <line x1="160" y1="46" x2="160" y2="280" stroke="#262626" stroke-width="1"/>
-  <!-- Right col border -->
-  <line x1="320" y1="46" x2="320" y2="280" stroke="#262626" stroke-width="1"/>
-  <!-- Left col mid border -->
-  <line x1="0" y1="163" x2="160" y2="163" stroke="#262626" stroke-width="1"/>
-  <!-- Right col mid border -->
-  <line x1="320" y1="163" x2="480" y2="163" stroke="#262626" stroke-width="1"/>
+  <!-- Content area (46 a 256) -->
+  <line x1="160" y1="46" x2="160" y2="256" stroke="#262626" stroke-width="1"/>
+  <line x1="320" y1="46" x2="320" y2="256" stroke="#262626" stroke-width="1"/>
+  <line x1="0" y1="151" x2="160" y2="151" stroke="#262626" stroke-width="1"/>
+  <line x1="320" y1="151" x2="480" y2="151" stroke="#262626" stroke-width="1"/>
 
-  <!-- ATUAL label + value -->
-  <text x="80" y="90" fill="#7A847A" font-size="10" font-family="monospace" text-anchor="middle">ATUAL</text>
-  <text x="80" y="138" fill="#F5F8F5" font-size="32" font-family="monospace" text-anchor="middle" font-weight="bold">1.347</text>
+  <!-- ATUAL (acento verde) / BEST (acento dourado) -->
+  <rect x="2" y="52" width="3" height="93" fill="#1F4D2A"/>
+  <text x="80" y="82" fill="#7A847A" font-size="10" font-family="monospace" text-anchor="middle">ATUAL</text>
+  <text x="80" y="124" fill="#F5F8F5" font-size="30" font-family="monospace" text-anchor="middle" font-weight="bold">44.347</text>
+  <rect x="2" y="157" width="3" height="93" fill="#4A3A0A"/>
+  <text x="80" y="187" fill="#7A847A" font-size="10" font-family="monospace" text-anchor="middle">BEST</text>
+  <text x="80" y="229" fill="#F5F8F5" font-size="30" font-family="monospace" text-anchor="middle" font-weight="bold">44.334</text>
 
-  <!-- BEST label + value -->
-  <text x="80" y="192" fill="#7A847A" font-size="10" font-family="monospace" text-anchor="middle">BEST</text>
-  <text x="80" y="240" fill="#F5F8F5" font-size="32" font-family="monospace" text-anchor="middle" font-weight="bold">1.334</text>
+  <!-- Centro: velocidade + delta (cantos HUD decorativos) -->
+  <path d="M 178,70 l 0,-10 l 10,0 M 292,60 l 10,0 l 0,10 M 178,215 l 0,10 l 10,0 M 302,215 l 0,10 l -10,0" stroke="#1F4D2A" stroke-width="3" fill="none"/>
+  <text x="240" y="160" fill="#F5F8F5" font-size="64" font-family="monospace" text-anchor="middle" font-weight="bold">87</text>
+  <text x="285" y="172" fill="#7A847A" font-size="11" font-family="monospace">km/h</text>
+  <text x="215" y="205" fill="#3EE07A" font-size="11" font-family="monospace" text-anchor="middle">DELTA</text>
+  <text x="268" y="207" fill="#FF5A5A" font-size="19" font-family="monospace" text-anchor="middle" font-weight="bold">+0.13</text>
 
-  <!-- Center: speed -->
-  <text x="235" y="178" fill="#F5F8F5" font-size="72" font-family="monospace" text-anchor="middle" font-weight="bold">87</text>
-  <text x="284" y="192" fill="#7A847A" font-size="12" font-family="monospace">km/h</text>
+  <!-- Direita: VOLTA + SETORES (delta ao vivo por setor) -->
+  <text x="400" y="82" fill="#7A847A" font-size="10" font-family="monospace" text-anchor="middle">VOLTA</text>
+  <text x="400" y="128" fill="#F5F8F5" font-size="44" font-family="monospace" text-anchor="middle" font-weight="bold">7</text>
+  <text x="400" y="180" fill="#7A847A" font-size="10" font-family="monospace" text-anchor="middle">SETORES</text>
+  <text x="400" y="204" font-size="12" font-family="monospace" text-anchor="middle"><tspan fill="#3EC6E0">S1 22.41 </tspan><tspan fill="#3EE07A">(-0.12)</tspan></text>
+  <text x="400" y="224" font-size="12" font-family="monospace" text-anchor="middle"><tspan fill="#FFD700">S2 41.02 </tspan><tspan fill="#FF5A5A">(+0.25)</tspan></text>
 
-  <!-- Delta row -->
-  <text x="220" y="230" fill="#3EE07A" font-size="11" font-family="monospace" text-anchor="middle">DELTA</text>
-  <text x="272" y="232" fill="#FF5A5A" font-size="20" font-family="monospace" text-anchor="middle" font-weight="bold">+0.13</text>
+  <!-- Strip inferior: MAX / PREV / IDEAL -->
+  <line x1="0" y1="256" x2="480" y2="256" stroke="#262626" stroke-width="1"/>
+  <text x="80"  y="272" fill="#F5F8F5" font-size="11" font-family="monospace" text-anchor="middle">MAX 94</text>
+  <text x="240" y="272" fill="#FF5A5A" font-size="11" font-family="monospace" text-anchor="middle">PREV 44.47</text>
+  <text x="400" y="272" fill="#FFD700" font-size="11" font-family="monospace" text-anchor="middle">IDEAL: 44.19</text>
 
-  <!-- Right col: VOLTA -->
-  <text x="400" y="90" fill="#7A847A" font-size="10" font-family="monospace" text-anchor="middle">VOLTA</text>
-  <text x="400" y="138" fill="#F5F8F5" font-size="48" font-family="monospace" text-anchor="middle" font-weight="bold">7</text>
-
-  <!-- Right col: VEL MAX -->
-  <text x="400" y="192" fill="#7A847A" font-size="10" font-family="monospace" text-anchor="middle">VEL MAX</text>
-  <text x="400" y="240" fill="#F5F8F5" font-size="32" font-family="monospace" text-anchor="middle" font-weight="bold">94</text>
-
-  <!-- Tab bar -->
+  <!-- Tab bar (4 abas) -->
   <rect x="0" y="280" width="480" height="40" fill="#000"/>
   <line x1="0" y1="280" x2="480" y2="280" stroke="#262626" stroke-width="1"/>
-  <line x1="160" y1="280" x2="160" y2="320" stroke="#262626" stroke-width="1"/>
-  <line x1="320" y1="280" x2="320" y2="320" stroke="#262626" stroke-width="1"/>
-  <text x="80"  y="306" fill="#3EE07A" font-size="11" font-family="monospace" text-anchor="middle" font-weight="bold">CORRIDA</text>
-  <text x="240" y="306" fill="#7A847A" font-size="11" font-family="monospace" text-anchor="middle">VOLTAS</text>
-  <text x="400" y="306" fill="#7A847A" font-size="11" font-family="monospace" text-anchor="middle">CONFIG</text>
+  <line x1="120" y1="280" x2="120" y2="320" stroke="#262626" stroke-width="1"/>
+  <line x1="240" y1="280" x2="240" y2="320" stroke="#262626" stroke-width="1"/>
+  <line x1="360" y1="280" x2="360" y2="320" stroke="#262626" stroke-width="1"/>
+  <text x="60"  y="306" fill="#7A847A" font-size="11" font-family="monospace" text-anchor="middle">PISTA</text>
+  <text x="180" y="306" fill="#3EE07A" font-size="11" font-family="monospace" text-anchor="middle" font-weight="bold">CORRIDA</text>
+  <text x="300" y="306" fill="#7A847A" font-size="11" font-family="monospace" text-anchor="middle">VOLTAS</text>
+  <text x="420" y="306" fill="#7A847A" font-size="11" font-family="monospace" text-anchor="middle">CONFIG</text>
 </svg>
 </div>
-<div class="screen-caption">Aba CORRIDA — sessão ativa, volta 7, perdendo +0,13 s para o best</div>
+<div class="screen-caption">Aba CORRIDA (layout completo) — volta 7, perdendo +0,13 s; S1 foi recorde (-0.12), S2 perdeu (+0.25)</div>
 
 <h3>Barra de LED (Delta visual)</h3>
 <p>A barra de segmentos no topo funciona como shift-light de RPM — mas para o delta de tempo. Cada lado tem 8 LEDs, cada um representando ~187 ms de diferença (escala de 0 a 1.500 ms total). A barra inteira acesa = 1,5 s de diferença.</p>
@@ -390,13 +400,23 @@
 <h3>Campos da tela</h3>
 <table>
   <tr><th>Campo</th><th>Descrição</th><th>Reset</th></tr>
-  <tr><td>ATUAL</td><td>Tempo decorrido na volta em andamento (atualiza a 10 Hz)</td><td>Ao cruzar a linha</td></tr>
-  <tr><td>BEST</td><td>Menor tempo de volta da sessão atual</td><td>Nova sessão</td></tr>
+  <tr><td>ATUAL</td><td>Tempo decorrido na volta em andamento</td><td>Ao cruzar a linha</td></tr>
+  <tr><td>BEST</td><td>Menor tempo de volta da sessão atual (acento dourado)</td><td>Nova sessão</td></tr>
   <tr><td>Velocidade (centro)</td><td>Velocidade instantânea GPS em km/h</td><td>—</td></tr>
-  <tr><td>DELTA</td><td>Diferença da última volta fechada vs o best anterior a ela. <span style="color:var(--green)">Verde = mais rápido</span>, <span style="color:var(--red)">vermelho = mais lento</span></td><td>Nova sessão</td></tr>
+  <tr><td>DELTA</td><td>Delta AO VIVO vs o ritmo da melhor volta, ponto a ponto. <span style="color:var(--green)">Verde = ganhando</span>, <span style="color:var(--red)">vermelho = perdendo</span></td><td>Nova sessão</td></tr>
   <tr><td>VOLTA</td><td>Número da volta atual</td><td>Nova sessão</td></tr>
-  <tr><td>VEL MAX</td><td>Velocidade máxima atingida na sessão inteira</td><td>Nova sessão</td></tr>
+  <tr><td>SETORES</td><td>Splits da volta em andamento; no cruzamento aparece o <strong>delta vs seu melhor setor</strong> — <span style="color:var(--green)">(-0.12) verde ganhou</span>, <span style="color:var(--red)">(+0.25) vermelho perdeu</span></td><td>A cada volta</td></tr>
+  <tr><td>MAX / PREV / IDEAL (barra inferior)</td><td>Velocidade máxima da sessão · volta prevista (best + delta ao vivo) · volta ideal (soma dos seus melhores setores)</td><td>Nova sessão</td></tr>
 </table>
+
+<h3>Layouts da tela — tap no MODE ou toque no centro</h3>
+<p>A tela CORRIDA tem <strong>3 layouts</strong>, ciclados com um tap no botão físico <kbd>MODE</kbd> (ou tocando na área central):</p>
+<div class="legend">
+  <div class="legend-item"><strong>Completo</strong> — tudo visível (mockup acima)</div>
+  <div class="legend-item"><strong>Foco DELTA</strong> — só o delta em número gigante colorido + linha com ATUAL e VOLTA. Ideal pra caçar tempo no qualy</div>
+  <div class="legend-item"><strong>Foco VELOCIDADE</strong> — velocímetro gigante + delta pequeno embaixo</div>
+</div>
+<p>A preferência é salva <strong>por modo de condução</strong>: QUALY pode abrir sempre no foco DELTA e CORRIDA no completo, por exemplo — segurar <kbd>MODE</kbd> troca o modo e a tela acompanha.</p>
 </section>
 
 <!-- ═══════════════════════════════════════════════════════════ 4. ABA VOLTAS -->
@@ -505,13 +525,23 @@
   <li><span class="step-num">4</span>Se o SD foi modificado externamente (via WiFi ou USB), toque em <kbd>atualizar</kbd> para recarregar a lista.</li>
 </ol>
 
+<h3>Comparar duas voltas (toque a toque)</h3>
+<ol class="steps">
+  <li><span class="step-num">1</span>Toque numa volta da lista — ela ganha contorno azul (selecionada).</li>
+  <li><span class="step-num">2</span>Toque numa segunda volta — abre o comparativo: tempos, diferença, vel max/média e, se a sessão tem setores, <strong>o tempo de cada trecho lado a lado</strong> (S1/S2/S3 com a diferença de cada um).</li>
+  <li><span class="step-num">3</span>Toque em qualquer lugar pra fechar. Tocar de novo na mesma volta desmarca.</li>
+</ol>
+
+<h3>Mapa da pista</h3>
+<p>O botão <kbd>Mapa</kbd> desenha o traçado da sessão com <strong>heatmap de velocidade</strong> (verde = lento → vermelho = rápido). O botão <kbd>Ver:</kbd> alterna entre a <strong>sessão inteira</strong> e <strong>só a melhor volta</strong> (zoom justo nela) — a linha boa sem a poluição das outras passagens.</p>
+
 <h3>Colunas da lista</h3>
 <table>
   <tr><th>Coluna</th><th>Descrição</th></tr>
   <tr><td>Volta N</td><td>Número sequencial da volta na sessão</td></tr>
-  <tr><td>Tempo</td><td>Duração em segundos e milissegundos (ex: 1.334 = 1 min 33,4 s)</td></tr>
-  <tr><td>Delta</td><td>Diferença vs o best <em>até aquele ponto da sessão</em>. Verde = mais rápido, vermelho = mais lento</td></tr>
-  <tr><td>Vel max</td><td>Pico de velocidade GPS registrado durante a volta</td></tr>
+  <tr><td>Tempo</td><td>Duração da volta (ex: 44.334; acima de 1 min vira 1:04.120)</td></tr>
+  <tr><td>Delta</td><td>Diferença vs o <strong>best da sessão inteira</strong>. Vermelho = quanto perdeu; a melhor volta mostra BEST</td></tr>
+  <tr><td>Vel max / med</td><td>Pico e média de velocidade GPS da volta</td></tr>
 </table>
 
 <div class="box green">
@@ -524,7 +554,7 @@
 <section id="config">
 <h2>05 · Configurações — Aba CONFIG</h2>
 
-<p>A aba CONFIG é scrollável — deslize para cima para ver os campos de texto no final.</p>
+<p>A aba CONFIG é organizada em <strong>4 sub-abas</strong> no topo: <kbd>SISTEMA</kbd> (status, diagnóstico, brilho, tema, backup, pen drive), <kbd>CORRIDA</kbd> (fuso, gate, min volta, auto-sessão), <kbd>WIFI</kbd> (AP próprio ou cliente da sua rede) e <kbd>BLE</kbd> (rádio, nome, PIN). Cada sub-aba é scrollável. Os mockups abaixo ilustram os controles típicos (steppers, barras, campos) — a organização atual distribui esses itens entre as sub-abas.</p>
 
 <!-- MOCKUP CONFIG (topo) -->
 <div class="screen-wrap">
@@ -684,18 +714,31 @@
 
 <h3>Referência das configurações</h3>
 <table>
-  <tr><th>Configuração</th><th>Descrição</th><th>Faixa</th><th>Padrão</th></tr>
-  <tr><td>FUSO HORARIO</td><td>Offset UTC em minutos, usado nos nomes dos arquivos de sessão. Passo: 15 min.</td><td>±12h</td><td>UTC-3 (Brasília)</td></tr>
-  <tr><td>RAIO DO GATE</td><td>Raio em metros para considerar "cruzou a linha". Passo: 1 m. GPS de consumo tem ~3–5 m de erro, não desça abaixo de 10 m.</td><td>5–30 m</td><td>15 m</td></tr>
-  <tr><td>MIN VOLTA</td><td>Tempo mínimo entre cruzamentos para ser contado como volta. Evita falsos positivos ao passar perto da linha lentamente. Passo: 1 s.</td><td>5–120 s</td><td>10 s</td></tr>
-  <tr><td>NOME BLE</td><td>Nome do dispositivo visível nos apps de telemetria. Salva na NVS; <strong>reinício necessário</strong> para o novo nome ser anunciado.</td><td>até 31 chars</td><td>KartBox</td></tr>
-  <tr><td>SENHA WIFI</td><td>Senha do ponto de acesso WiFi criado durante o export. Mínimo 8 caracteres (padrão WPA2).</td><td>8–63 chars</td><td>kart2026race</td></tr>
+  <tr><th>Sub-aba</th><th>Item</th><th>Descrição</th></tr>
+  <tr><td rowspan="8">SISTEMA</td><td>Status GPS</td><td>Link com o módulo: erro de fiação / buscando sinal / fix ok</td></tr>
+  <tr><td>RF GPS</td><td>Diagnóstico de antena: satélites que o módulo <em>sabe</em> vs <em>ouve</em> por constelação + melhor SNR. Verde = saudável</td></tr>
+  <tr><td>AUTOTESTE</td><td>SD · GPS · BLE/C6, cada um verde (ok) ou vermelho (falha)</td></tr>
+  <tr><td>BRILHO DA TELA</td><td>20–100% em passos de 10, aplica na hora e persiste</td></tr>
+  <tr><td>TEMA (cor da UI)</td><td>Verde, Azul, Âmbar, Laranja ou Roxo — alertas continuam sempre vermelho/dourado. Reinício aplica</td></tr>
+  <tr><td>Salvar / Restaurar config (SD)</td><td>Backup completo das configurações num arquivo texto <code>kartbox_config.txt</code> na raiz do cartão</td></tr>
+  <tr><td>Modo pen drive / Apagar tudo</td><td>Ver seção 09 · exclusão exige confirmação em dois toques</td></tr>
+  <tr><td>FIRMWARE</td><td>Versão em execução (confere se o OTA aplicou)</td></tr>
+  <tr><td rowspan="4">CORRIDA</td><td>FUSO HORARIO</td><td>Offset UTC (passo 15 min) — usado nos nomes dos arquivos. Padrão UTC-3</td></tr>
+  <tr><td>RAIO DO GATE</td><td>Meia-largura tolerada da linha de chegada (5–30 m, padrão 15). Com RF bom dá pra apertar até ~8–10 m</td></tr>
+  <tr><td>MIN VOLTA</td><td>Tempo mínimo entre cruzamentos (5–120 s, padrão 10) — anti-falso-positivo</td></tr>
+  <tr><td>AUTO-SESSÃO</td><td>Inicia sozinho ao andar (&gt;10 km/h por 3 s com pista carregada) e encerra após 2 min parado, com popup de estatísticas. Padrão: ligado</td></tr>
+  <tr><td rowspan="3">WIFI</td><td>Modo</td><td>AP próprio (rede "KartBox-XXXX", sempre funciona) ou Cliente (entra na sua rede/roteamento do celular)</td></tr>
+  <tr><td>Rede + senha (Cliente)</td><td>Dropdown com scan de redes + senha; botão único <kbd>Conectar/Desconectar</kbd></td></tr>
+  <tr><td>SENHA DO AP</td><td>Senha do ponto de acesso próprio (mín. 8 chars, padrão kart2026race)</td></tr>
+  <tr><td rowspan="3">BLE</td><td>Rádio BLE</td><td>Liga/desliga o anúncio — <strong>persiste entre boots</strong></td></tr>
+  <tr><td>NOME BLE</td><td>Nome anunciado (até 31 chars, padrão KartBox) — reinício aplica</td></tr>
+  <tr><td>PIN BLE</td><td>Segunda camada de segurança dos comandos remotos (vazio = desativado)</td></tr>
 </table>
 
-<h3>Editar nome BLE / senha WiFi</h3>
+<h3>Editar campos de texto (nome BLE, senhas, PIN)</h3>
 <ol class="steps">
-  <li><span class="step-num">1</span>Role a aba CONFIG para baixo até ver os campos <strong>NOME BLE</strong> e <strong>SENHA WIFI</strong>.</li>
-  <li><span class="step-num">2</span>Toque no campo desejado — o teclado LVGL aparece sobreposto na parte inferior da tela.</li>
+  <li><span class="step-num">1</span>Abra a sub-aba correspondente (<kbd>WIFI</kbd>, <kbd>BLE</kbd> ou <kbd>PISTA</kbd> pro nome de pista).</li>
+  <li><span class="step-num">2</span>Toque no campo desejado — o teclado aparece na parte inferior. O teclado só abre no <strong>toque direto</strong>: rolar a tela com o dedo em cima de um campo não abre nada.</li>
   <li><span class="step-num">3</span>Edite o texto e pressione ✓ para salvar. O valor é gravado na NVS imediatamente.</li>
   <li><span class="step-num">4</span>Pressione ✕ para cancelar sem salvar.</li>
 </ol>
@@ -845,15 +888,15 @@
 
 <ol class="steps">
   <li><span class="step-num">1</span>Encerre a sessão (WiFi é bloqueado durante gravação para não afetar a performance).</li>
-  <li><span class="step-num">2</span>Na aba CONFIG, toque em <strong>Ativar WiFi export</strong>. O botão muda de texto e aparecem o SSID, senha e IP.</li>
-  <li><span class="step-num">3</span>Conecte o celular no WiFi cujo nome começa com <code>KartBox-</code>.</li>
-  <li><span class="step-num">4</span>Acesse <code>http://192.168.4.1</code> no navegador para baixar os arquivos CSV.</li>
-  <li><span class="step-num">5</span>Quando terminar, toque em <strong>Desligar WiFi export</strong>. O AP também desliga sozinho após 5 minutos sem acesso (proteção automática).</li>
+  <li><span class="step-num">2</span>Em CONFIG → <kbd>WIFI</kbd>: no modo <strong>AP próprio</strong>, toque em <strong>Ligar WiFi (AP próprio)</strong>; no modo <strong>Cliente</strong>, escolha a rede no dropdown (botão <kbd>Escanear</kbd>), digite a senha e toque em <strong>Conectar</strong>.</li>
+  <li><span class="step-num">3</span>AP próprio: conecte o celular no WiFi <code>KartBox-XXXX</code> e acesse <code>http://192.168.4.1</code>. Modo Cliente: celular na mesma rede, acesse <code>http://kartbox.local</code> (o IP também aparece na tela). Um ícone WiFi ciano pisca na status bar enquanto ativo.</li>
+  <li><span class="step-num">4</span>Na página: baixe CSVs, converta para <strong>GPX/VBO/RaceChrono</strong>, abra a <strong>Análise</strong> de cada sessão (gráfico velocidade×distância, mapa sincronizado, insights automáticos, relatório imprimível), a <strong>Evolução entre sessões</strong>, o <strong>Editor de pista</strong>, envie arquivos pro cartão e faça <strong>atualização de firmware (OTA)</strong>.</li>
+  <li><span class="step-num">5</span>Quando terminar: <strong>Desligar WiFi</strong> (AP) ou <strong>Desconectar</strong> (Cliente). O rádio também desliga sozinho após 5 minutos sem acesso.</li>
 </ol>
 
 <div class="box gold">
-  <div class="box-label">Mudar a senha</div>
-  Na aba CONFIG, role para baixo e edite o campo <strong>SENHA WIFI</strong>. O novo valor é gravado na NVS e usado na próxima vez que ativar o WiFi export. Mínimo de 8 caracteres (padrão WPA2).
+  <div class="box-label">Mudar a senha do AP</div>
+  Em CONFIG → WIFI (modo AP próprio), edite o campo <strong>SENHA DO AP</strong>. Mínimo de 8 caracteres (padrão WPA2).
 </div>
 </section>
 
@@ -871,7 +914,7 @@
 <ol class="steps">
   <li><span class="step-num">1</span>Conecte o cabo USB ao computador.</li>
   <li><span class="step-num">2</span>Encerre qualquer sessão ativa (modo USB é bloqueado durante gravação).</li>
-  <li><span class="step-num">3</span>Na aba CONFIG, toque em <strong>Modo pen drive (USB)</strong>. O SD aparece como volume removível no SO.</li>
+  <li><span class="step-num">3</span>Em CONFIG → <kbd>SISTEMA</kbd>, toque em <strong>Modo pen drive (USB)</strong>. O SD aparece como volume removível no SO e um <strong>ícone USB pisca na status bar</strong> enquanto o modo estiver ativo.</li>
   <li><span class="step-num">4</span>Copie ou exclua os arquivos pelo computador normalmente.</li>
   <li><span class="step-num">5</span>No computador, ejete o volume com segurança. Depois toque <strong>Encerrar modo pen drive</strong> na tela — o SD é remontado e o KartBox volta ao funcionamento normal.</li>
 </ol>
@@ -881,7 +924,7 @@
 <section id="modos">
 <h2>10 · Modos QUALY vs CORRIDA</h2>
 
-<p>O botão MODE físico alterna entre os dois modos. Só pode ser mudado com sessão parada.</p>
+<p><strong>Segurar o botão MODE por 1 segundo</strong> alterna entre os dois modos (só com sessão parada). O tap curto do MODE não troca o modo — ele cicla o <strong>layout da tela CORRIDA</strong> (completo → delta gigante → velocidade gigante), e a preferência fica salva <em>por modo</em>: QUALY pode rodar com o delta gigante (caçando tempo) e CORRIDA com a tela completa, por exemplo. Tocar na área central da tela CORRIDA cicla do mesmo jeito.</p>
 
 <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin:20px 0">
   <div class="box green">
@@ -907,11 +950,13 @@
 
 <h3>Status bar (linha do topo)</h3>
 <table>
-  <tr><th>Indicador</th><th>Verde / Azul</th><th>Cinza / Apagado</th></tr>
-  <tr><td>● GPS N</td><td>Fix válido, N satélites</td><td>Sem fix (posição inválida)</td></tr>
-  <tr><td>Pílula central</td><td>QUALY (verde)</td><td>RACE (vermelho)</td></tr>
+  <tr><th>Indicador</th><th>Ativo</th><th>Inativo</th></tr>
+  <tr><td>● GPS N</td><td>Verde = fix válido, N satélites</td><td>Sem fix (dourado buscando / vermelho piscando = sem link)</td></tr>
+  <tr><td>Pílula central</td><td>QUALY (cor do tema)</td><td>RACE (vermelho, sempre)</td></tr>
   <tr><td>● REC</td><td style="color:var(--red)">Vermelho = sessão gravando</td><td>Sessão parada</td></tr>
-  <tr><td>BLE</td><td style="color:var(--blue)">Azul = cliente conectado</td><td>Sem cliente BLE</td></tr>
+  <tr><td>WiFi (ciano)</td><td>Piscando = export no ar (AP ou cliente conectado)</td><td>Oculto</td></tr>
+  <tr><td>USB (cor do tema)</td><td>Piscando = modo pen drive ativo (SD com o computador)</td><td>Oculto</td></tr>
+  <tr><td>BLE</td><td style="color:var(--blue)">Azul = cliente conectado</td><td>Cinza = anunciando · apagado = rádio desligado</td></tr>
 </table>
 
 <h3>Arquivo CSV — colunas</h3>
@@ -927,6 +972,7 @@
   <tr><td>lap_time_ms</td><td>uint32</td><td>Tempo decorrido na volta atual em ms</td></tr>
   <tr><td>best_lap_ms</td><td>uint32</td><td>Melhor volta da sessão em ms (0 se ainda não tem)</td></tr>
   <tr><td>delta_ms</td><td>int32</td><td>Delta da última volta fechada vs best anterior (negativo = mais rápido)</td></tr>
+  <tr><td>s1_ms / s2_ms</td><td>uint32</td><td>Splits de setor cumulativos da volta em andamento (0 = setor ainda não cruzado). Habilitam a comparação setor a setor e as linhas de setor na Análise web</td></tr>
 </table>
 
 <div class="box green">
@@ -937,7 +983,7 @@
 
 <!-- ═══════════════════════════════════════════════════════════ FOOTER -->
 <div style="text-align:center; padding-top:48px; border-top:1px solid var(--border); color:var(--muted); font-size:11px; letter-spacing:2px">
-  KARTBOX v2 &nbsp;·&nbsp; ESP32 + LVGL &nbsp;·&nbsp; GPS NMEA &nbsp;·&nbsp; 2025
+  KARTBOX v2 &nbsp;·&nbsp; v1.0-beta &nbsp;·&nbsp; ESP32-P4 + LVGL &nbsp;·&nbsp; GPS u-blox M10 &nbsp;·&nbsp; 2026
 </div>
 
 </div><!-- /page -->

@@ -5,13 +5,108 @@
 # ── Target ──────────────────────────────────────────────────────────────────
 CONFIG_IDF_TARGET="esp32p4"
 
+# ── Flash / particoes ────────────────────────────────────────────────────────
+# GUITION JC4880P443C_I_W tem 16MB de flash. Tabela padrao (1MB de app) e
+# pequena demais pro binario (LVGL+fontes+BLE+WiFi remoto ~1.5MB) — usamos
+# partitions.csv customizado com 4MB de app.
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+
+# Chip da placa e' rev v1.3 (eco2) — default do IDF 5.5.4 exige v3.1+
+# (usa extensoes de instrucao xesploop/xespv que so existem em silicio
+# v3.x). v1.0 e' a opcao mais alta disponivel que ainda cobre v1.3.
+CONFIG_ESP32P4_REV_MIN_100=y
+
+# ── PSRAM ───────────────────────────────────────────────────────────────────
+# Placa tem 32MB PSRAM. O crash anterior (Load access fault em
+# s_set_psram_cs_timing a 200MHz) foi sob IDF 5.5.4 - driver de PSRAM
+# diferente/quebrado pra essa revisao de chip. Agora estamos sob IDF 5.3.5
+# (driver que ja provou funcionar, 20MHz OK). Testando 200MHz de novo aqui
+# porque o DSI/MIPI precisa de banda alta (senao da underrun continuo no
+# framebuffer) - se travar de novo no mesmo lugar, e' o driver de PSRAM
+# do 5.3.5 tendo o mesmo bug e a gente recua pra 80M ou 120M.
+# NOTA: CONFIG_SPIRAM_SPEED_200M so aparece no Kconfig com "Experimental
+# Features" habilitado (confirmado - issue espressif/esp-idf#15831). Sem
+# isso a opcao nem existe e o valor no defaults e' ignorado em silencio
+# (por isso ficou preso em 20MHz na ultima tentativa).
+CONFIG_IDF_EXPERIMENTAL_FEATURES=y
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_HEX=y
+CONFIG_SPIRAM_SPEED_200M=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"
+
+# ── OTA ─────────────────────────────────────────────────────────────────────
+# partitions.csv agora tem ota_0/ota_1 + otadata (update via POST /ota no
+# wifi_export). Rollback: se o firmware novo nao confirmar o boot
+# (esp_ota_mark_app_valid em app_main), o bootloader volta sozinho pra
+# versao anterior no proximo reset - update ruim nao brica o equipamento.
+# ATENCAO: sdkconfig.defaults nao sobrescreve um sdkconfig ja existente -
+# habilite tambem via menuconfig (Bootloader config > app rollback) OU
+# apague o sdkconfig e rebuilde.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# ── mbedTLS (HTTPS do A-GPS) ────────────────────────────────────────────────
+# BUG REAL (2 atos): handshake TLS com o servico AssistNow morria em
+# "esp-aes: Failed to allocate memory" e depois "esp-sha: Failed to
+# allocate buf memory". Causa raiz: MBEDTLS_INTERNAL_MEM_ALLOC forca o
+# mbedTLS inteiro (buffers de handshake ~40KB + working buffers dos
+# aceleradores) em RAM INTERNA, que nesse projeto vive no limite
+# (esp_hosted + BT + LVGL - ver historico). Correcao em 2 partes:
+#  1. Alocacao do mbedTLS vai pra PSRAM (32MB sobrando). TLS fica um
+#     pouco mais lento; pra 50KB de efemerides por dia, tanto faz.
+#  2. AES/SHA por hardware desligados - os buffers DMA deles PRECISAM
+#     ser internos por definicao (DMA nao alcanca PSRAM nesse caminho),
+#     entao nao adianta so mudar a estrategia de alocacao. Software
+#     crypto nao tem essa exigencia. (GCM hw depende do AES hw.)
+CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC=n
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+CONFIG_MBEDTLS_HARDWARE_AES=n
+CONFIG_MBEDTLS_HARDWARE_SHA=n
+
 # ── Bluetooth (NimBLE host no P4, controller no C6 coprocessador) ───────────
+# Causa real do crash achada: sd_logger.c usava SDMMC_HOST_SLOT_1 pro
+# cartao SD, mas o esp_hosted TAMBEM usa slot 1 pro C6 (CONFIG_ESP_HOSTED_
+# SDIO_SLOT=1) - dois donos pro mesmo slot no unico controlador SDMMC do
+# chip (ver github.com/espressif/esp-hosted-mcu#124). Corrigido pra
+# SDMMC_HOST_SLOT_0 no SD (pinos nao mudam, so o slot logico). Religando
+# BT/WiFi de novo agora que a causa raiz foi corrigida.
 CONFIG_BT_ENABLED=y
 CONFIG_BT_NIMBLE_ENABLED=y
 CONFIG_BT_CONTROLLER_ENABLED=n
 
+# Sem isso o NimBLE assume transporte HCI via UART fisica (default:
+# UART_NUM_1!) e tenta uart_driver_install() na MESMA porta que o GPS ja
+# usa -> "UART driver already installed" -> abort(). O Kconfig do proprio
+# esp_hosted so liga a ponte VHCI quando esse flag esta desligado.
+CONFIG_BT_NIMBLE_TRANSPORT_UART=n
+
+# "ESP_HOSTED_ENABLE_BT_NIMBLE" (a ponte VHCI de verdade) tem "default n"
+# no Kconfig do esp_hosted - sem isso o linker fica sem implementacao do
+# transporte (undefined reference a ble_transport_*).
+CONFIG_ESP_HOSTED_ENABLE_BT_NIMBLE=y
+
 # ── WiFi ────────────────────────────────────────────────────────────────────
 CONFIG_ESP_WIFI_ENABLED=y
+
+# esp_hosted/esp_wifi_remote (ponte SDIO com o C6) - religado pra BT/WiFi
+# funcionarem. ATENCAO: a task de fundo desse componente (H_SDIO_DRV) sobe
+# ANTES do app_main, e foi a causa confirmada do crash "Interrupt wdt
+# timeout" no uart_driver_install() do GPS (ver historico). Reordenar
+# gps_init() no main.c nao adianta pra esse problema especifico, porque o
+# SDIO ja tah rodando antes de qualquer linha do app_main executar. Se o
+# crash voltar, a correcao real vai ter que gatear/atrasar o start do
+# esp_hosted (nao da pra resolver so no main.c).
+CONFIG_ESP_HOSTED_ENABLED=y
+CONFIG_ESP_WIFI_REMOTE_ENABLED=y
+
+# Por padrao o esp_hosted aloca o mempool dos buffers SDIO em RAM INTERNA
+# (escassa nesse chip, ~124KB livre no boot). Com BT+WiFi+esp_hosted todos
+# ligados o binario quase dobrou de tamanho (172KB -> 357KB de segmento
+# mapeado) e a RAM interna esgotou antes ate do FreeRTOS subir a task de
+# timer (assert vApplicationGetTimerTaskMemory, pxStackBufferTemp==NULL).
+# Move o mempool pra PSRAM (tem 32MB sobrando) pra aliviar a interna.
+CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM=y
 
 # ── USB (TinyUSB MSC para modo pen drive) ───────────────────────────────────
 CONFIG_TINYUSB_ENABLED=y
@@ -20,12 +115,68 @@ CONFIG_TINYUSB_MSC_ENABLED=y
 # ── NVS (settings persistidos) ──────────────────────────────────────────────
 CONFIG_NVS_ENCRYPTION=n
 
+# ── FATFS (cartao SD) ────────────────────────────────────────────────────────
+# BUG REAL ACHADO: default de fabrica do IDF e' FATFS_LFN_NONE (sem nome
+# longo, so 8.3 estrito tipo ARQUIVO.EXT). Todo nome de arquivo que esse
+# projeto gera e' mais longo que isso - sessao "20260702_143022.csv"
+# (15 chars antes do ".csv") e qualquer nome de pista digitado pelo
+# usuario com mais de 8 chars. Sem LFN, f_open()/f_mkdir() recusam esses
+# nomes com FR_INVALID_NAME -> esp_vfs_fat mapeia pra errno EINVAL. Isso
+# explicava tanto "pista nao salva" quanto "sessao nao grava" - nao era
+# escrita travada nem largura do barramento, era nome de arquivo
+# incompativel com 8.3. LFN_HEAP aloca o buffer de nome longo do heap
+# (tem PSRAM de sobra) em vez da stack (evita risco de estouro).
+CONFIG_FATFS_LFN_HEAP=y
+
 # ── LVGL (via esp_lvgl_port — não mexer sem checar display_init.c) ──────────
 CONFIG_LV_COLOR_DEPTH_16=y
+
+# lv_label_set_text_fmt() usa o sprintf PROPRIO da LVGL por padrao
+# (LV_USE_BUILTIN_SPRINTF), que nao implementa "%f" (poupar flash) - ele so
+# imprime a letra 'f' literal e descarta o valor double, silenciosamente.
+# Sintoma visto: labels com "%.0fm"/"%.0fs"/"%.1fGB"/"%+.2f" (raio do gate,
+# min volta, uso do SD, delta) mostrando "fm"/"fs"/etc em vez do numero.
+# Troca pro vsnprintf de verdade da libc (newlib do ESP-IDF), que suporta
+# float direito - custa um pouco mais de flash, sobra de sobra nos 16MB.
+CONFIG_LV_USE_CLIB_SPRINTF=y
+
+# BUG REAL: watchdog travado pra sempre dentro de lv_draw_unit_draw_letter
+# (lv_draw_label.c:647), MEPC parado no mesmo lugar em TODO boot, mesmo
+# depois de mover a stack da taskLVGL pra PSRAM (nao era estouro de pilha).
+# Linha 647 e' "LV_ASSERT_MALLOC(draw_buf)" logo apos lv_draw_buf_create_ex()
+# pro buffer A8 de UM glifo - LV_ASSERT_MALLOC entra num while(1) quando a
+# alocacao falha, em vez de crashar limpo, o que explicava o PC preso.
+# Causa real: LV_MEM_SIZE_KILOBYTES=64 (padrao do Kconfig) e' um POOL FIXO
+# proprio da LVGL (LV_USE_BUILTIN_MALLOC), separado do heap normal do
+# ESP-IDF - toda alocacao interna da LVGL (objetos, estilos, buffers de
+# glifo) sai dai, nao da PSRAM/heap geral. A aba CONFIG virar 4 sub-abas
+# (cada uma com seu proprio conjunto de widgets, todas construidas e vivas
+# ao mesmo tempo no boot) empurrou o uso total pra cima dos 64KB - o pool
+# esgotou e a PRIMEIRA alocacao de buffer de glifo depois disso falhou.
+# 256KB da folga generosa pro tamanho atual da UI (e pro crescimento
+# razoavel dela) sem mexer no heap geral do sistema (GPS/BLE/WiFi/SD).
+CONFIG_LV_MEM_SIZE_KILOBYTES=256
 
 # ── Stack sizes ──────────────────────────────────────────────────────────────
 # LVGL precisa de stack generoso; GPS e SD rodam em tasks separadas
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# ── Coredump ────────────────────────────────────────────────────────────────
+# Crash em campo -> dump ELF na particao "coredump" (partitions.csv) ->
+# no boot seguinte main.c salva no SD e apaga. Analise em casa:
+#   espcoredump.py info_corefile -c coredump_N.elf build/kartbox.elf
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
+
+# ── HTTP server (WiFi export) ───────────────────────────────────────────────
+# Default de 512 bytes pro TOTAL de headers da requisicao e' apertado pra
+# navegador moderno (Chrome manda sec-ch-ua*, Accept comprido etc.) - e o
+# Referer das paginas internas (/analise?file=...) empurrou alem do
+# limite: browser recebia "Header fields are too long" (431). 2KB da
+# folga confortavel; custo e' um buffer por request, irrelevante aqui.
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=2048
+CONFIG_HTTPD_MAX_URI_LEN=1024
 
 # ── Log ─────────────────────────────────────────────────────────────────────
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y

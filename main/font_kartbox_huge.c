@@ -4,11 +4,7 @@
  * Opts: --font /usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf -r 0x30-0x39 -r 0x2E -r 0x2B -r 0x2D --size 96 --format lvgl --bpp 4 -o /sessions/lucid-magical-brown/mnt/Kartbox v2/main/font_kartbox_huge.c --no-compress
  ******************************************************************************/
 
-#ifdef LV_LVGL_H_INCLUDE_SIMPLE
 #include "lvgl.h"
-#else
-#include "lvgl/lvgl.h"
-#endif
 
 #ifndef FONT_KARTBOX_HUGE
 #define FONT_KARTBOX_HUGE 1

@@ -144,6 +144,29 @@ void ble_telemetry_set_device_name(const char *name);
 /** @brief true se ha uma central conectada. */
 bool ble_telemetry_is_connected(void);
 
+/**
+ * @brief Liga/desliga o anuncio (advertising) e aceite de nova conexao
+ * BLE em runtime - reduz o trafego de RF ativo do NimBLE (util p.ex.
+ * pra testar se o radio BLE atrapalha a recepcao do GPS). Desconecta a
+ * central atual se estiver indo de true->false.
+ *
+ * IMPORTANTE: isso NAO desliga o link SDIO com o co-processador C6, que
+ * continua ligado por ser infraestrutura compartilhada com o WiFi
+ * remoto - so para a transmissao/anuncio BLE em si, nao e' "radio
+ * desligado" no nivel de hardware.
+ */
+void ble_telemetry_set_enabled(bool enabled);
+
+/** @brief Estado atual do toggle acima (default: true, ligado). */
+bool ble_telemetry_is_enabled(void);
+
+/**
+ * @brief true depois que o host NimBLE sincronizou com o controller no
+ * C6 (via esp_hosted). Continuar false apos o boot = link SDIO/C6 com
+ * problema - consumido pelo autoteste da CONFIG > SISTEMA.
+ */
+bool ble_telemetry_host_synced(void);
+
 #ifdef __cplusplus
 }
 #endif

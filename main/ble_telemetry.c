@@ -16,6 +16,7 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "esp_log.h"
+#include "esp_random.h"
 
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
@@ -60,6 +61,22 @@ static volatile bool s_rsp_subscribed   = false;
 static volatile bool s_authed           = false;  /* Parte A: limpo a cada conexao */
 static ble_telemetry_packet_t s_last_packet;
 static char s_device_name[32] = BLE_DEVICE_NAME_DEFAULT;
+
+/* Liga/desliga so o ANUNCIO/transmissao BLE (ble_telemetry_set_enabled).
+ * IMPORTANTE: isso NAO desliga o link SDIO com o co-processador C6 (onde
+ * o radio BT/WiFi de verdade mora) - esse link e' infraestrutura
+ * compartilhada com o WiFi remoto e desmontar ele em runtime nao foi
+ * testado/e' arriscado dado o historico de crashes do esp_hosted nesse
+ * projeto (ver config.h). Isso so garante que o P4 pare de mandar o
+ * NimBLE anunciar/aceitar conexao - reduz trafego de RF ativo, mas nao
+ * e' "radio desligado" de verdade.
+ *
+ * Default DESLIGADO (2026-07-02): usuario decidiu manter BLE fora por
+ * padrao - feature de telemetria por celular usada pouco, e suspeita de
+ * interferencia no GPS (satelite parou de pegar na mesma posicao fisica
+ * que pegava antes). Liga sob demanda via switch na aba CONFIG se quiser
+ * usar o app celular numa sessao especifica. */
+static volatile bool s_radio_enabled = false;
 
 /* ── Fila de comandos ───────────────────────────────────────────────── */
 #define CMD_QUEUE_LEN       4
@@ -537,7 +554,7 @@ static int gap_event_handler(struct ble_gap_event *event, void *arg)
             s_rsp_subscribed   = false;
             s_authed           = false;  /* nova sessao sempre começa sem auth */
             ESP_LOGI(TAG, "Central conectou (handle %d)", s_conn_handle);
-        } else {
+        } else if (s_radio_enabled) {
             start_advertising();
         }
         return 0;
@@ -548,7 +565,7 @@ static int gap_event_handler(struct ble_gap_event *event, void *arg)
         s_telem_subscribed = false;
         s_rsp_subscribed   = false;
         s_authed           = false;
-        start_advertising();
+        if (s_radio_enabled) start_advertising();
         return 0;
 
     case BLE_GAP_EVENT_ENC_CHANGE:
@@ -560,9 +577,16 @@ static int gap_event_handler(struct ble_gap_event *event, void *arg)
         return 0;
 
     case BLE_GAP_EVENT_PASSKEY_ACTION:
-        /* SMP Parte B: exibe passkey de 6 digitos no display LVGL */
+        /* SMP Parte B: NimBLE nao gera o passkey sozinho quando a acao e
+         * DISP — cabe ao app sortear o numero, mostrar na tela e injetar
+         * de volta via ble_sm_inject_io() pra stack usar na confirmacao. */
         if (event->passkey.params.action == BLE_SM_IOACT_DISP) {
-            uint32_t passkey = event->passkey.params.numval;
+            uint32_t passkey = esp_random() % 1000000;
+            struct ble_sm_io pkey = {
+                .action  = BLE_SM_IOACT_DISP,
+                .passkey = passkey,
+            };
+            ble_sm_inject_io(event->passkey.conn_handle, &pkey);
             ESP_LOGI(TAG, "SMP passkey: %06" PRIu32, passkey);
             ui_show_ble_passkey(passkey);
         }
@@ -583,7 +607,7 @@ static int gap_event_handler(struct ble_gap_event *event, void *arg)
         return 0;
 
     case BLE_GAP_EVENT_ADV_COMPLETE:
-        start_advertising();
+        if (s_radio_enabled) start_advertising();
         return 0;
 
     default:
@@ -609,16 +633,34 @@ static void start_advertising(void)
     adv_params.conn_mode = BLE_GAP_CONN_MODE_UND;
     adv_params.disc_mode = BLE_GAP_DISC_MODE_GEN;
 
+    /* Na primeira sincronizacao com o controller (C6, via hosted/VHCI) o
+     * NimBLE as vezes dispara uma tentativa de advertising interna antes
+     * do sync terminar de verdade (log mostra BLE_HS_ENOTSYNCED), o que
+     * deixa o estado "ja anunciando" marcado e faz o ble_gap_adv_start()
+     * seguinte falhar com rc=2 (BLE_HS_EALREADY). ble_gap_adv_stop() aqui
+     * e' no-op se nao tinha nada rolando - so garante estado limpo antes
+     * de comecar de verdade. */
+    ble_gap_adv_stop();
+
     rc = ble_gap_adv_start(s_own_addr_type, NULL, BLE_HS_FOREVER,
                             &adv_params, gap_event_handler, NULL);
     if (rc != 0) ESP_LOGE(TAG, "adv_start falhou (rc=%d)", rc);
 }
 
+static bool s_host_synced = false; /* host NimBLE sincronizou com o controller (C6)? - autoteste */
+
+bool ble_telemetry_host_synced(void)
+{
+    return s_host_synced;
+}
+
 static void ble_on_sync(void)
 {
+    s_host_synced = true;
     ble_hs_id_infer_auto(0, &s_own_addr_type);
-    start_advertising();
-    ESP_LOGI(TAG, "BLE sincronizado, anunciando como \"%s\"", s_device_name);
+    if (s_radio_enabled) start_advertising();
+    ESP_LOGI(TAG, "BLE sincronizado (%s) como \"%s\"",
+             s_radio_enabled ? "anunciando" : "anuncio desligado", s_device_name);
 }
 
 static void ble_on_reset(int reason)
@@ -724,7 +766,7 @@ void ble_telemetry_set_device_name(const char *name)
     strncpy(s_device_name, name, sizeof(s_device_name) - 1);
     s_device_name[sizeof(s_device_name) - 1] = '\0';
     ble_svc_gap_device_name_set(s_device_name);
-    if (s_conn_handle == BLE_HS_CONN_HANDLE_NONE) {
+    if (s_radio_enabled && s_conn_handle == BLE_HS_CONN_HANDLE_NONE) {
         ble_gap_adv_stop();
         start_advertising();
     }
@@ -733,4 +775,32 @@ void ble_telemetry_set_device_name(const char *name)
 bool ble_telemetry_is_connected(void)
 {
     return s_conn_handle != BLE_HS_CONN_HANDLE_NONE;
+}
+
+/**
+ * @brief Liga/desliga o anuncio+aceite de conexao BLE em runtime. Ver
+ * comentario de s_radio_enabled: para o trafego de RF ativo do NimBLE,
+ * mas NAO desliga o link SDIO com o C6 (co-processador continua ligado,
+ * compartilhado com o WiFi remoto).
+ */
+void ble_telemetry_set_enabled(bool enabled)
+{
+    if (enabled == s_radio_enabled) return;
+    s_radio_enabled = enabled;
+
+    if (enabled) {
+        start_advertising();
+        ESP_LOGI(TAG, "BLE advertising reativado");
+    } else {
+        if (s_conn_handle != BLE_HS_CONN_HANDLE_NONE) {
+            ble_gap_terminate(s_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+        }
+        ble_gap_adv_stop();
+        ESP_LOGI(TAG, "BLE advertising parado (radio C6/SDIO continua ativo - ver doc)");
+    }
+}
+
+bool ble_telemetry_is_enabled(void)
+{
+    return s_radio_enabled;
 }

@@ -18,20 +18,36 @@ QueueHandle_t g_app_event_queue = NULL;
 
 /* Estado de debounce por botao. stable_active = nivel ja debounced;
  * raw_active_prev = ultima leitura crua (pra detectar mudanca antes do
- * debounce confirmar); has_hold = so o RESET usa a logica de segurar. */
+ * debounce confirmar).
+ *
+ * Dois estilos de tap+hold coexistem aqui, de proposito:
+ *  - RESET: tap dispara NO APERTO (iniciar sessao e' inofensivo e a
+ *    barra de hold pra encerrar ja e' armada por esse mesmo evento);
+ *    soltar antes do hold manda o ABORT pra recolher a barra.
+ *  - MODE:  tap so dispara NO SOLTAR (tap_on_release) - se disparasse
+ *    no aperto, um hold pra trocar de modo tambem ciclaria o layout
+ *    da tela sem querer no caminho. */
 static struct {
     gpio_num_t pin;
-    app_event_type_t press_event;
+    app_event_type_t press_event;         /* tap */
+    app_event_type_t hold_event;          /* so usado se has_hold */
+    uint32_t hold_ms;
+    bool     has_hold;
+    bool     tap_on_release;              /* tap decidido ao soltar (nao no aperto) */
+    bool     send_abort;                  /* soltar antes do hold -> APP_EVT_BTN_RESET_HOLD_ABORT */
     bool     stable_active;
     bool     raw_active_prev;
     int64_t  last_change_us;
     int64_t  press_start_us;
     bool     hold_fired;
-    bool     has_hold;
 } s_buttons[] = {
-    { .pin = BTN_MODE_PIN,    .press_event = APP_EVT_BTN_MODE,    .has_hold = false },
+    { .pin = BTN_MODE_PIN,    .press_event = APP_EVT_BTN_MODE,
+      .hold_event = APP_EVT_BTN_MODE_HELD, .hold_ms = BTN_MODE_HOLD_MS,
+      .has_hold = true,  .tap_on_release = true,  .send_abort = false },
     { .pin = BTN_SETLINE_PIN, .press_event = APP_EVT_BTN_SETLINE, .has_hold = false },
-    { .pin = BTN_RESET_PIN,   .press_event = APP_EVT_BTN_RESET,   .has_hold = true  },
+    { .pin = BTN_RESET_PIN,   .press_event = APP_EVT_BTN_RESET,
+      .hold_event = APP_EVT_BTN_RESET_HELD, .hold_ms = BTN_RESET_HOLD_MS,
+      .has_hold = true,  .tap_on_release = false, .send_abort = true  },
 };
 #define NUM_BUTTONS (sizeof(s_buttons) / sizeof(s_buttons[0]))
 
@@ -62,13 +78,27 @@ static void button_poll_task(void *arg)
 
                 if (b->stable_active) {
                     /* borda de subida (pressionou) */
-                    app_event_post(b->press_event, EVT_SRC_GPIO);
+                    if (!b->tap_on_release) {
+                        app_event_post(b->press_event, EVT_SRC_GPIO);
+                    } else {
+                        /* tap so ao soltar - mas a UI precisa saber do
+                         * aperto AGORA pra armar a barra de progresso do
+                         * hold (feedback visual, igual ao RESET). Hoje
+                         * so o MODE usa esse estilo. */
+                        app_event_post(APP_EVT_BTN_MODE_PRESSED, EVT_SRC_GPIO);
+                    }
                     b->press_start_us = now_us;
                     b->hold_fired = false;
                 } else {
-                    /* soltou antes do hold completar - avisa UI pra cancelar barra */
+                    /* soltou */
                     if (b->has_hold && !b->hold_fired) {
-                        app_event_post(APP_EVT_BTN_RESET_HOLD_ABORT, EVT_SRC_GPIO);
+                        if (b->tap_on_release) {
+                            /* soltou antes do hold = era um TAP */
+                            app_event_post(b->press_event, EVT_SRC_GPIO);
+                        } else if (b->send_abort) {
+                            /* soltou antes do hold completar - cancela barra */
+                            app_event_post(APP_EVT_BTN_RESET_HOLD_ABORT, EVT_SRC_GPIO);
+                        }
                     }
                     b->hold_fired = false;
                 }
@@ -76,8 +106,8 @@ static void button_poll_task(void *arg)
 
             if (b->has_hold && b->stable_active && !b->hold_fired) {
                 int64_t held_ms = (now_us - b->press_start_us) / 1000;
-                if (held_ms >= BTN_RESET_HOLD_MS) {
-                    app_event_post(APP_EVT_BTN_RESET_HELD, EVT_SRC_GPIO);
+                if (held_ms >= b->hold_ms) {
+                    app_event_post(b->hold_event, EVT_SRC_GPIO);
                     b->hold_fired = true;
                 }
             }
