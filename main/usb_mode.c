@@ -12,6 +12,8 @@
 #include "tinyusb.h"
 #include "tusb_msc_storage.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 static const char *TAG = "usb_mode";
 
@@ -115,6 +117,10 @@ bool usb_mode_enter(void)
         return false;
     }
 
+    /* Se o driver ficou instalado de uma saida anterior (uninstall falhou),
+     * o D+ segue solto pelo tud_disconnect() de la - reconecta. */
+    tud_connect();
+
     s_active = true;
     ESP_LOGI(TAG, "Modo USB pen drive ativo");
     return true;
@@ -123,6 +129,12 @@ bool usb_mode_enter(void)
 void usb_mode_exit(void)
 {
     if (!s_active) return;
+
+    /* Soft-disconnect (D+ solto) ANTES de tudo: sem isso o Windows segue
+     * achando que o drive esta la mesmo com o driver desinstalado (ou com o
+     * uninstall falhando). Da um tempo pro host processar a remocao. */
+    tud_disconnect();
+    vTaskDelay(pdMS_TO_TICKS(300));
 
     tinyusb_msc_storage_deinit();
 
