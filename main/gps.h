@@ -145,6 +145,15 @@ void gps_set_log_queue(QueueHandle_t sd_log_queue);
  */
 bool gps_inject_agps(const uint8_t *data, size_t len);
 
+/**
+ * @brief Le do modulo as duas respostas UBX que o registro AssistNow (ZTP
+ * da Thingstream) exige: UBX-SEC-UNIQID e UBX-MON-VER, cada uma como o
+ * FRAME inteiro em hex continuo maiusculo. Bloqueia ate ~5 s.
+ * Buffers: uniqid >= 40 chars, monver >= 1100 chars.
+ * @return true se as duas respostas chegaram.
+ */
+bool gps_read_ztp_info(char *uniqid_hex, size_t uniqid_sz, char *monver_hex, size_t monver_sz);
+
 /** @brief Marca a posicao+heading atuais como linha de chegada/saida.
  *  @return true se marcou (havia fix GPS valido), false se nao (sem fix -
  *  nada foi alterado). Chamador deve checar isso antes de dar feedback
@@ -265,6 +274,11 @@ void gps_get_rf_diag(gps_rf_diag_t *out);
  *  Pensado pra aba CONFIG sinalizar "modulo com problema" vs "so buscando
  *  sinal ainda", que sao causas bem diferentes de "sem fix" na tela. */
 gps_link_status_t gps_get_link_status(void);
+
+/* true se o firmware detectou o GPS ligado com TX/RX invertidos (config.h
+ * diz 51/52, mas o NMEA so chega com os dois trocados). Auto-detectado e
+ * gravado em NVS - ver "Auto-deteccao da pinagem" em gps.c. */
+bool gps_pins_swapped(void);
 
 /**
  * @brief Hora local (UTC + offset configurado), ja com data corrigida

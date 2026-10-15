@@ -136,6 +136,13 @@ void    settings_set_auto_session(uint8_t enabled);
 const char *settings_get_agps_token(void);
 void        settings_set_agps_token(const char *token);
 
+/* Chipcode do AssistNow novo (Thingstream ZTP): obtido sozinho pelo
+ * firmware registrando o modulo GPS (UBX-SEC-UNIQID + MON-VER). Vazio =
+ * ainda nao registrado. Chave NVS: "agps_chip". */
+#define SETTINGS_AGPS_CHIP_MAX (192)
+const char *settings_get_agps_chip(void);
+void        settings_set_agps_chip(const char *chip);
+
 /* ------------------------------------------------------------------
  * Radio BLE ligado/desligado - persiste o switch da CONFIG > BLE.
  * 0 = anuncio BLE nao sobe no boot (o link SDIO com o C6 continua, e'

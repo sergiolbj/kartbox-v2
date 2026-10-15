@@ -4,6 +4,9 @@
 #include "wifi_export.h"
 #include "config.h"
 #include "app_events.h"
+#include "kb_pure.h"
+#include "esp_core_dump.h"
+#include "esp_partition.h"
 #include "track_manager.h"
 
 #include <string.h>
@@ -231,6 +234,16 @@ static esp_err_t index_get_handler(httpd_req_t *req)
         "padding:14px 16px;color:var(--text);font-size:15px;text-decoration:none\">"
         "&#128200; <b>Evolucao entre sessoes</b><br>"
         "<small style=\"color:var(--muted)\">best, media e consistencia por dia, pista a pista</small></a>"
+        "<a href=\"/arquivos\" style=\"flex:1;min-width:220px;background:var(--surface);"
+        "border:1px solid var(--line);border-left:3px solid var(--gold);border-radius:8px;"
+        "padding:14px 16px;color:var(--text);font-size:15px;text-decoration:none\">"
+        "&#128193; <b>Arquivos do SD</b><br>"
+        "<small style=\"color:var(--muted)\">navegar pastas, baixar, enviar e apagar arquivos</small></a>"
+        "<a href=\"/log\" style=\"flex:1;min-width:220px;background:var(--surface);"
+        "border:1px solid var(--line);border-left:3px solid var(--muted);border-radius:8px;"
+        "padding:14px 16px;color:var(--text);font-size:15px;text-decoration:none\">"
+        "&#128221; <b>Log do sistema</b><br>"
+        "<small style=\"color:var(--muted)\">o mesmo log da serial, ao vivo no navegador</small></a>"
         "</div>"
         /* Upload pelo browser - pedido do usuario. Le o arquivo local
          * como bytes crus (arrayBuffer) e manda via fetch() com o corpo
@@ -242,7 +255,7 @@ static esp_err_t index_get_handler(httpd_req_t *req)
         "<h3>Enviar arquivo pro cartao</h3>"
         "<p style=\"color:var(--muted);font-size:13px;margin:4px 0 8px\">"
         "destino automatico: <b>.csv</b> &rarr; sessions &middot; <b>.trk</b> &rarr; tracks &middot; "
-        "qualquer outro (ex: editor.html) &rarr; raiz do cartao</p>"
+        "qualquer outro (ex: backup de config) &rarr; raiz do cartao</p>"
         "<input type=\"file\" id=\"upfile\"> "
         "<button onclick=\"kbUpload()\">Enviar</button> "
         "<span id=\"upstatus\"></span>"
@@ -1124,14 +1137,9 @@ static esp_err_t evolution_get_handler(httpd_req_t *req)
  *
  *   POST /agps     - corpo = arquivo .ubx baixado manualmente do servico
  *                    (funciona em qualquer modo, ate no AP proprio).
- *   GET  /agps_dl  - o FIRMWARE baixa direto da u-blox e injeta. Exige
- *                    modo Cliente numa rede com internet (ex: roteamento
- *                    do celular). ?token=XXX na primeira vez (salvo em
- *                    NVS); depois pode chamar sem token.
- *
- * Token: gratis em thingstream.io (Location Services > AssistNow).
- * HTTP simples (sem TLS) - o servico u-blox atende nas duas portas e os
- * dados de efemerides sao publicos/nao-sensiveis; poupa o handshake TLS.
+ *   GET  /agps_dl  - o FIRMWARE baixa direto da u-blox e injeta (fluxo
+ *                    AssistNow/ZTP abaixo). Exige modo Cliente com internet.
+ *                    Tambem roda sozinho ao conectar no WiFi.
  * --------------------------------------------------------------------- */
 #define AGPS_MAX_BYTES (256 * 1024)
 
@@ -1173,112 +1181,192 @@ static esp_err_t agps_post_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-static esp_err_t agps_download_handler(httpd_req_t *req)
+/* ---- AssistNow (Thingstream ZTP) -------------------------------------
+ * 1) Registro (1x por modulo): le UBX-SEC-UNIQID + UBX-MON-VER do GPS e
+ *    faz POST em api.thingstream.io/ztp/assistnow/credentials com o token
+ *    do perfil. Resposta traz o "chipcode", guardado no NVS.
+ * 2) Download: GET GetAssistNowData.ashx?chipcode=..&gnss=..&data=.. devolve
+ *    UBX-MGA cru, injetado direto no modulo.
+ * Roda sozinho ao conectar no WiFi (modo Cliente) e em GET /agps_dl. */
+#define AGPS_ZTP_URL      "https://api.thingstream.io/ztp/assistnow/credentials"
+#define AGPS_DATA_URL     "https://assistnow.services.u-blox.com/GetAssistNowData.ashx"
+#define AGPS_MIN_GAP_MS   (30 * 60 * 1000)   /* nao rebaixa antes de 30 min */
+
+static volatile bool    s_agps_busy = false;
+static volatile int64_t s_agps_last_ok_ms = 0;
+
+/* Le o corpo inteiro de uma resposta ja aberta (headers lidos). */
+static int agps_read_all(esp_http_client_handle_t cli, uint8_t *buf, int cap)
 {
-    touch_activity();
-
-    char query[128];
-    char token[SETTINGS_AGPS_TOKEN_MAX] = {0};
-    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
-        httpd_query_key_value(query, "token", token, sizeof(token));
-    }
-    if (token[0]) {
-        settings_set_agps_token(token); /* informou = salva pros proximos */
-    } else {
-        strncpy(token, settings_get_agps_token(), sizeof(token) - 1);
-    }
-    if (!token[0]) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
-                            "sem token AssistNow - crie gratis em thingstream.io e informe no campo");
-        return ESP_FAIL;
-    }
-
-    /* eph+alm+aux das 4 constelacoes que o MAX-M10 usa. A resposta ja
-     * comeca com UBX-MGA-INI-TIME_UTC (hora do servidor) - o modulo
-     * ganha efemerides + hora de uma vez, que e' o que corta o cold
-     * start de minutos pra segundos.
-     * HTTPS obrigatorio: o servico NAO atende http simples (testado em
-     * campo - recusa/redireciona, e aqui a resposta e' lida na mao, sem
-     * seguir redirect). crt_bundle do IDF valida o certificado. */
-    char url[256];
-    snprintf(url, sizeof(url),
-             "https://online-live1.services.u-blox.com/GetOnlineData.ashx"
-             "?token=%s;gnss=gps,gal,bds,glo;datatype=eph,alm,aux", token);
-
-    esp_http_client_config_t cfg = {
-        .url               = url,
-        .timeout_ms        = 20000,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-    };
-    esp_http_client_handle_t cli = esp_http_client_init(&cfg);
-    if (!cli) {
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "falha ao criar cliente http");
-        return ESP_FAIL;
-    }
-
-    esp_err_t err = esp_http_client_open(cli, 0);
-    if (err != ESP_OK) {
-        esp_http_client_cleanup(cli);
-        /* open() cobre DNS+TCP+TLS - falha aqui pode ser tanto rede
-         * (sem internet / modo AP) quanto handshake TLS (ex: falta de
-         * RAM interna pro AES de hardware - ver sdkconfig.defaults). O
-         * log serial (esp-tls/esp-aes) diz qual dos dois foi. */
-        ESP_LOGE(TAG, "A-GPS: esp_http_client_open falhou (%s)", esp_err_to_name(err));
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
-                            "falha ao conectar no servico u-blox - sem internet (modo Cliente?) ou TLS falhou (ver log serial)");
-        return ESP_FAIL;
-    }
-    esp_http_client_fetch_headers(cli);
-    int status = esp_http_client_get_status_code(cli);
-    if (status != 200) {
-        esp_http_client_cleanup(cli);
-        ESP_LOGW(TAG, "A-GPS: servico u-blox respondeu %d", status);
-        char emsg[96];
-        snprintf(emsg, sizeof(emsg),
-                 "servico u-blox respondeu HTTP %d (403=token errado/expirado)", status);
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, emsg);
-        return ESP_FAIL;
-    }
-
-    uint8_t *buf = heap_caps_malloc(AGPS_MAX_BYTES, MALLOC_CAP_SPIRAM);
-    if (!buf) {
-        esp_http_client_cleanup(cli);
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "sem memoria");
-        return ESP_FAIL;
-    }
     int total = 0;
-    while (total < AGPS_MAX_BYTES) {
-        int r = esp_http_client_read(cli, (char *)buf + total, AGPS_MAX_BYTES - total);
+    while (total < cap) {
+        int r = esp_http_client_read(cli, (char *)buf + total, cap - total);
         if (r <= 0) break;
         total += r;
     }
-    esp_http_client_cleanup(cli);
+    return total;
+}
 
-    if (total <= 0) {
-        free(buf);
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "resposta vazia do servico u-blox");
-        return ESP_FAIL;
+/* Registra o modulo e grava o chipcode. msg recebe motivo em caso de erro. */
+static bool agps_register(char *msg, size_t msgsz)
+{
+    char uid[48], ver[1100];
+    if (!gps_read_ztp_info(uid, sizeof uid, ver, sizeof ver)) {
+        snprintf(msg, msgsz, "GPS nao respondeu (UBX)");
+        return false;
     }
+    size_t bsz = strlen(AGPS_ZTP_TOKEN_DEFAULT) + strlen(uid) + strlen(ver) + 128;
+    char *body = malloc(bsz);
+    char *resp = malloc(1024);
+    if (!body || !resp) { free(body); free(resp); snprintf(msg, msgsz, "sem memoria"); return false; }
+    int bl = snprintf(body, bsz,
+        "{\"token\":\"%s\",\"messages\":{\"UBX-SEC-UNIQID\":\"%s\",\"UBX-MON-VER\":\"%s\"}}",
+        AGPS_ZTP_TOKEN_DEFAULT, uid, ver);
 
-    ESP_LOGI(TAG, "A-GPS: %d bytes baixados da u-blox, injetando...", total);
+    esp_http_client_config_t cfg = { .url = AGPS_ZTP_URL, .method = HTTP_METHOD_POST,
+        .timeout_ms = 20000, .crt_bundle_attach = esp_crt_bundle_attach };
+    esp_http_client_handle_t cli = esp_http_client_init(&cfg);
+    bool ok = false;
+    if (!cli) { snprintf(msg, msgsz, "http init"); goto out; }
+    esp_http_client_set_header(cli, "Content-Type", "application/json");
+    if (esp_http_client_open(cli, bl) != ESP_OK) {
+        snprintf(msg, msgsz, "sem internet/TLS"); esp_http_client_cleanup(cli); goto out;
+    }
+    esp_http_client_write(cli, body, bl);
+    esp_http_client_fetch_headers(cli);
+    int st = esp_http_client_get_status_code(cli);
+    int n = agps_read_all(cli, (uint8_t *)resp, 1023);
+    resp[n > 0 ? n : 0] = '\0';
+    esp_http_client_cleanup(cli);
+    char chip[SETTINGS_AGPS_CHIP_MAX];
+    if (st == 200 && kb_json_str(resp, "chipcode", chip, sizeof chip)) {
+        settings_set_agps_chip(chip);
+        ESP_LOGI(TAG, "A-GPS: modulo registrado, chipcode salvo");
+        ok = true;
+    } else {
+        ESP_LOGW(TAG, "A-GPS: registro falhou HTTP %d: %.120s", st, resp);
+        snprintf(msg, msgsz, "registro recusado (HTTP %d)", st);
+    }
+out:
+    free(body); free(resp);
+    return ok;
+}
+
+/* Baixa + injeta. Devolve bytes injetados (>0) ou <0: -1 rede, -2 chipcode
+ * recusado (401/403: precisa registrar de novo), -3 resposta nao-UBX, -4 UART. */
+static int agps_fetch_inject(const char *chip, const char *data, char *msg, size_t msgsz)
+{
+    char enc[SETTINGS_AGPS_CHIP_MAX * 3];
+    if (!kb_url_encode(chip, enc, sizeof enc)) { snprintf(msg, msgsz, "chipcode longo"); return -2; }
+    char url[512];
+    snprintf(url, sizeof url, AGPS_DATA_URL "?chipcode=%s&gnss=gps,gal,bds,glo&data=%s", enc, data);
+
+    esp_http_client_config_t cfg = { .url = url, .timeout_ms = 25000, .crt_bundle_attach = esp_crt_bundle_attach };
+    esp_http_client_handle_t cli = esp_http_client_init(&cfg);
+    if (!cli) { snprintf(msg, msgsz, "http init"); return -1; }
+    if (esp_http_client_open(cli, 0) != ESP_OK) {
+        esp_http_client_cleanup(cli); snprintf(msg, msgsz, "sem internet/TLS"); return -1;
+    }
+    esp_http_client_fetch_headers(cli);
+    int st = esp_http_client_get_status_code(cli);
+    if (st == 401 || st == 403) {
+        esp_http_client_cleanup(cli); snprintf(msg, msgsz, "chipcode recusado (HTTP %d)", st); return -2;
+    }
+    if (st != 200) {
+        esp_http_client_cleanup(cli); snprintf(msg, msgsz, "u-blox HTTP %d", st); return -1;
+    }
+    uint8_t *buf = heap_caps_malloc(AGPS_MAX_BYTES, MALLOC_CAP_SPIRAM);
+    if (!buf) { esp_http_client_cleanup(cli); snprintf(msg, msgsz, "sem memoria"); return -1; }
+    int total = agps_read_all(cli, buf, AGPS_MAX_BYTES);
+    esp_http_client_cleanup(cli);
+    if (total < 8 || buf[0] != 0xB5 || buf[1] != 0x62) {
+        /* servidor responde texto de erro (ex: tipo nao autorizado) com 200 as vezes */
+        ESP_LOGW(TAG, "A-GPS: resposta nao e' UBX (%d B): %.80s", total, total > 0 ? (char *)buf : "");
+        free(buf); snprintf(msg, msgsz, "resposta invalida"); return -3;
+    }
+    ESP_LOGI(TAG, "A-GPS: %d bytes baixados (%s), injetando...", total, data);
     bool ok = gps_inject_agps(buf, (size_t)total);
     free(buf);
-    if (!ok) {
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "falha ao injetar no modulo");
+    if (!ok) { snprintf(msg, msgsz, "falha ao injetar"); return -4; }
+    return total;
+}
+
+/* Fluxo completo: registra se preciso, baixa, injeta. true = injetou. */
+static bool agps_sync(char *msg, size_t msgsz)
+{
+    if (s_agps_busy) { snprintf(msg, msgsz, "ja em andamento"); return false; }
+    s_agps_busy = true;
+    bool ok = false;
+    msg[0] = '\0';
+
+    if (!settings_get_agps_chip()[0] && !agps_register(msg, msgsz)) goto done;
+
+    /* Tenta orbitas "live" + almanaque + hora; se o plano nao autorizar,
+     * cai pras preditivas de 1 dia. Cada tentativa conta 1 req (limite 300/mes). */
+    static const char *const kSets[] = { "utime,ulorb_l1,ualm", "utime,uporb_1,ualm" };
+    bool reregistered = false;
+    size_t i = 0;
+    while (i < sizeof kSets / sizeof kSets[0]) {
+        char chip[SETTINGS_AGPS_CHIP_MAX];
+        strncpy(chip, settings_get_agps_chip(), sizeof chip - 1); chip[sizeof chip - 1] = '\0';
+        int r = agps_fetch_inject(chip, kSets[i], msg, msgsz);
+        if (r > 0) { ok = true; break; }
+        if (r == -2) {                       /* chipcode invalido: re-registra 1x e repete o set */
+            if (reregistered) break;
+            reregistered = true;
+            settings_set_agps_chip("");
+            if (!agps_register(msg, msgsz)) break;
+        } else if (r == -3) {
+            i++;                             /* tipo nao autorizado/resposta texto: tenta o proximo set */
+        } else {
+            break;                           /* rede/UART: outro set nao ajuda */
+        }
+    }
+    if (ok) s_agps_last_ok_ms = esp_timer_get_time() / 1000;
+done:
+    s_agps_busy = false;
+    return ok;
+}
+
+/* Disparada ao pegar IP no modo Cliente. Espera a rede assentar, evita
+ * repetir em < 30 min (reconexoes) e avisa o resultado na tela. */
+static void agps_auto_task(void *arg)
+{
+    (void)arg;
+    vTaskDelay(pdMS_TO_TICKS(4000));
+    int64_t now = esp_timer_get_time() / 1000;
+    if (s_agps_last_ok_ms && now - s_agps_last_ok_ms < AGPS_MIN_GAP_MS) { vTaskDelete(NULL); return; }
+    char msg[64];
+    if (agps_sync(msg, sizeof msg)) ui_show_toast("A-GPS atualizado", 3000);
+    else { ESP_LOGW(TAG, "A-GPS auto: %s", msg); ui_show_toast("A-GPS falhou - ver log", 3000); }
+    vTaskDelete(NULL);
+}
+
+static esp_err_t agps_download_handler(httpd_req_t *req)
+{
+    touch_activity();
+    char msg[64];
+    if (!agps_sync(msg, sizeof msg)) {
+        char e[96];
+        snprintf(e, sizeof e, "A-GPS falhou: %s", msg);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, e);
         return ESP_FAIL;
     }
-
-    char msg[80];
-    snprintf(msg, sizeof(msg), "ok - %d bytes de A-GPS injetados no modulo GPS", total);
-    httpd_resp_sendstr(req, msg);
+    httpd_resp_sendstr(req, "ok - A-GPS injetado no modulo GPS");
     return ESP_OK;
 }
 
 /* ---------------------------------------------------------------------
- * Editor de pista (celular) - GET /editor serve um HTML autocontido
- * (sem CDN, sem mapa - usa a Geolocation API do proprio navegador) que
- * o usuario copia manualmente pra raiz do cartao como "editor.html".
- * Nao embutimos o HTML na flash pra nao inchar o binario do firmware.
+ * Editor de pista (celular) - GET /editor serve o editor.html.
+ * O arquivo vai EMBUTIDO no firmware (~25KB, main/CMakeLists.txt
+ * target_add_binary_data), entao funciona sem nada no cartao. Um
+ * "editor.html" na raiz do SD e' IGNORADO (versao antiga esquecida no
+ * cartao ja serviu editor desatualizado).
+ *
+ * ATENCAO: servido por http:// simples, o navegador do celular bloqueia a
+ * Geolocation (exige contexto seguro) - dados moveis nao mudam isso. O
+ * proprio editor mostra um aviso explicando; marcar no mapa e sincronizar
+ * funcionam normal. Pra usar o GPS do celular, abrir o arquivo local.
  *
  * /api/tracks e /api/track trocam pistas em binario CRU, byte a byte
  * identico ao arquivo .trk (== struct track_config_t) - nao tem parser
@@ -1298,32 +1386,40 @@ static void add_cors_headers(httpd_req_t *req)
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
 }
 
+/* editor.html embutido (CMake gera estes simbolos; TEXT => terminado em NUL) */
+extern const char editor_html_start[] asm("_binary_editor_html_start");
+
 static esp_err_t editor_get_handler(httpd_req_t *req)
 {
     touch_activity();
     httpd_resp_set_type(req, "text/html");
+    /* Sempre a copia embutida no firmware: assim o editor nunca fica
+     * desatualizado por causa de um editor.html antigo esquecido no SD. */
+    return httpd_resp_send(req, editor_html_start, HTTPD_RESP_USE_STRLEN);
+}
 
-    FILE *f = fopen(WIFI_EDITOR_HTML_PATH, "r");
-    if (!f) {
-        httpd_resp_sendstr(req,
-            "<html><body><h3>editor.html nao encontrado no cartao</h3>"
-            "<p>Copie o arquivo track_editor.html para a raiz do cartao SD "
-            "com o nome <code>editor.html</code>.</p></body></html>");
-        return ESP_OK;
-    }
+/* GET /api/gps - posicao atual do modulo GPS do kartbox, em JSON. Usado pelo
+ * botao "Usar GPS do kartbox" do editor (nao depende da Geolocation do
+ * navegador, que exige https). Sem fix: {"fix":false,"sats":N}. */
+static esp_err_t api_gps_handler(httpd_req_t *req)
+{
+    touch_activity();
+    add_cors_headers(req);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
 
-    char buf[512];
-    size_t n;
-    while ((n = fread(buf, 1, sizeof(buf), f)) > 0) {
-        if (httpd_resp_send_chunk(req, buf, n) != ESP_OK) {
-            fclose(f);
-            httpd_resp_sendstr_chunk(req, NULL);
-            return ESP_FAIL;
-        }
+    gps_sample_t s;
+    gps_get_latest(&s);
+
+    char buf[160];
+    if (s.fix_valid) {
+        snprintf(buf, sizeof(buf),
+                 "{\"fix\":true,\"sats\":%u,\"lat\":%.7f,\"lon\":%.7f,\"speed\":%.1f,\"heading\":%.1f}",
+                 (unsigned)s.satellites, s.lat, s.lon, (double)s.speed_kmh, (double)s.heading_deg);
+    } else {
+        snprintf(buf, sizeof(buf), "{\"fix\":false,\"sats\":%u}", (unsigned)s.satellites);
     }
-    fclose(f);
-    httpd_resp_send_chunk(req, NULL, 0);
-    return ESP_OK;
+    return httpd_resp_sendstr(req, buf);
 }
 
 static esp_err_t tracks_list_get_handler(httpd_req_t *req)
@@ -1469,11 +1565,346 @@ static esp_err_t delete_session_post_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+/* ---------------------------------------------------------------------
+ * Explorer do SD (GET /arquivos + /api/fs*). Pagina embutida no firmware
+ * (explorer.html). Todo caminho vem da URL e passa por kb_fs_path_ok()
+ * (sem "..", sem "//", sem controle) e e' SEMPRE prefixado com o ponto de
+ * montagem - nao ha como sair do /sdcard.
+ * --------------------------------------------------------------------- */
+#include <sys/stat.h>
+#include <unistd.h>
+#include <errno.h>
+
+extern const char explorer_html_start[] asm("_binary_explorer_html_start");
+extern const char logview_html_start[]  asm("_binary_logview_html_start");
+
+#define FS_PATH_MAX   (160)
+#define FS_UPLOAD_MAX (512u * 1024u * 1024u)
+
+static esp_err_t explorer_get_handler(httpd_req_t *req)
+{
+    touch_activity();
+    httpd_resp_set_type(req, "text/html");
+    return httpd_resp_send(req, explorer_html_start, HTTPD_RESP_USE_STRLEN);
+}
+
+/* Le ?p= validado e monta o caminho real em full. false = ja respondeu 400/503. */
+static bool fs_get_path(httpd_req_t *req, char *rel, size_t relsz, char *full, size_t fullsz)
+{
+    char query[FS_PATH_MAX * 3];
+    rel[0] = '\0';
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
+        query_param(query, "p", rel, relsz);
+    }
+    if (!rel[0]) { rel[0] = '/'; rel[1] = '\0'; }
+    if (!kb_fs_path_ok(rel, relsz)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "caminho invalido");
+        return false;
+    }
+    if (!sd_logger_is_mounted()) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        httpd_resp_sendstr(req, "cartao SD nao montado");
+        return false;
+    }
+    size_t rl = strlen(rel);
+    if (rl > 1 && rel[rl - 1] == '/') rel[rl - 1] = '\0';   /* barra final some */
+    if (rel[1] == '\0') snprintf(full, fullsz, "%s", SD_MOUNT_POINT);
+    else                snprintf(full, fullsz, "%s%s", SD_MOUNT_POINT, rel);
+    return true;
+}
+
+/* nome seguro pra ir dentro de JSON "..." (descarta aspas/barra/controle) */
+static bool fs_name_json_ok(const char *n)
+{
+    for (const unsigned char *c = (const unsigned char *)n; *c; c++) {
+        if (*c < 0x20 || *c == 0x7F || *c == '"' || *c == '\\') return false;
+    }
+    return true;
+}
+
+static esp_err_t fs_list_handler(httpd_req_t *req)
+{
+    touch_activity();
+    char rel[FS_PATH_MAX], full[FS_PATH_MAX + 16];
+    if (!fs_get_path(req, rel, sizeof rel, full, sizeof full)) return ESP_FAIL;
+
+    DIR *d = opendir(full);
+    if (!d) { httpd_resp_send_404(req); return ESP_FAIL; }
+
+    uint64_t total = 0, freeb = 0;
+    sd_get_card_info(&total, &freeb);
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    char head[96];
+    snprintf(head, sizeof head, "{\"total\":%llu,\"free\":%llu,\"items\":[",
+             (unsigned long long)total, (unsigned long long)freeb);
+    httpd_resp_sendstr_chunk(req, head);
+
+    bool first = true;
+    struct dirent *e;
+    char item[FS_PATH_MAX + 96], p2[FS_PATH_MAX + 300];
+    while ((e = readdir(d)) != NULL) {
+        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+        if (!fs_name_json_ok(e->d_name)) continue;
+        snprintf(p2, sizeof p2, "%s/%s", full, e->d_name);
+        struct stat st;
+        if (stat(p2, &st) != 0) continue;
+        int n = snprintf(item, sizeof item, "%s{\"n\":\"%s\",\"d\":%d,\"s\":%lu,\"t\":%lld}",
+                         first ? "" : ",", e->d_name, S_ISDIR(st.st_mode) ? 1 : 0,
+                         (unsigned long)(S_ISDIR(st.st_mode) ? 0 : st.st_size), (long long)st.st_mtime);
+        if (n <= 0 || n >= (int)sizeof item) continue;
+        first = false;
+        if (httpd_resp_sendstr_chunk(req, item) != ESP_OK) { closedir(d); return ESP_FAIL; }
+    }
+    closedir(d);
+    httpd_resp_sendstr_chunk(req, "]}");
+    httpd_resp_sendstr_chunk(req, NULL);
+    return ESP_OK;
+}
+
+static esp_err_t fs_get_handler(httpd_req_t *req)
+{
+    touch_activity();
+    char rel[FS_PATH_MAX], full[FS_PATH_MAX + 16];
+    if (!fs_get_path(req, rel, sizeof rel, full, sizeof full)) return ESP_FAIL;
+
+    struct stat st;
+    if (stat(full, &st) != 0 || S_ISDIR(st.st_mode)) { httpd_resp_send_404(req); return ESP_FAIL; }
+    FILE *f = fopen(full, "rb");
+    if (!f) { httpd_resp_send_404(req); return ESP_FAIL; }
+
+    char bn[64], hdr[112];
+    kb_fs_basename(rel, bn, sizeof bn);
+    snprintf(hdr, sizeof hdr, "attachment; filename=\"%s\"", bn);
+    httpd_resp_set_type(req, "application/octet-stream");
+    httpd_resp_set_hdr(req, "Content-Disposition", hdr);
+
+    char *buf = malloc(4096);
+    if (!buf) { fclose(f); httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "sem memoria"); return ESP_FAIL; }
+    size_t n;
+    esp_err_t res = ESP_OK;
+    while ((n = fread(buf, 1, 4096, f)) > 0) {
+        if (httpd_resp_send_chunk(req, buf, n) != ESP_OK) { res = ESP_FAIL; break; }
+        touch_activity();
+    }
+    free(buf);
+    fclose(f);
+    if (res == ESP_OK) httpd_resp_send_chunk(req, NULL, 0);
+    else httpd_resp_sendstr_chunk(req, NULL);
+    return res;
+}
+
+static esp_err_t fs_put_handler(httpd_req_t *req)
+{
+    touch_activity();
+    char rel[FS_PATH_MAX], full[FS_PATH_MAX + 16];
+    if (!fs_get_path(req, rel, sizeof rel, full, sizeof full)) return ESP_FAIL;
+    if (rel[1] == '\0') { httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "caminho invalido"); return ESP_FAIL; }
+    if ((size_t)req->content_len > FS_UPLOAD_MAX) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "arquivo grande demais (max 512MB)");
+        return ESP_FAIL;
+    }
+    struct stat st;
+    if (stat(full, &st) == 0 && S_ISDIR(st.st_mode)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "ja existe uma pasta com esse nome");
+        return ESP_FAIL;
+    }
+    FILE *f = fopen(full, "wb");
+    if (!f) { httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "nao consegui criar o arquivo"); return ESP_FAIL; }
+    char *buf = malloc(4096);
+    if (!buf) { fclose(f); httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "sem memoria"); return ESP_FAIL; }
+
+    size_t remaining = req->content_len;
+    bool ok = true;
+    while (remaining > 0) {
+        int r = httpd_req_recv(req, buf, remaining > 4096 ? 4096 : remaining);
+        if (r == HTTPD_SOCK_ERR_TIMEOUT) continue;
+        if (r <= 0 || fwrite(buf, 1, (size_t)r, f) != (size_t)r) { ok = false; break; }
+        remaining -= (size_t)r;
+        touch_activity();
+    }
+    free(buf);
+    fclose(f);
+    if (!ok) {
+        remove(full);   /* nao deixa arquivo pela metade */
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "envio interrompido ou cartao cheio");
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG, "SD upload: %s (%u bytes)", rel, (unsigned)req->content_len);
+    httpd_resp_sendstr(req, "ok");
+    return ESP_OK;
+}
+
+static esp_err_t fs_rm_handler(httpd_req_t *req)
+{
+    touch_activity();
+    char rel[FS_PATH_MAX], full[FS_PATH_MAX + 16];
+    if (!fs_get_path(req, rel, sizeof rel, full, sizeof full)) return ESP_FAIL;
+    if (rel[1] == '\0') { httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "nao da pra apagar a raiz"); return ESP_FAIL; }
+
+    struct stat st;
+    if (stat(full, &st) != 0) { httpd_resp_send_404(req); return ESP_FAIL; }
+    int rc = S_ISDIR(st.st_mode) ? rmdir(full) : remove(full);
+    if (rc != 0) {
+        if (errno == ENOTEMPTY || errno == EEXIST) httpd_resp_set_status(req, "409 Conflict");
+        else httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_sendstr(req, "nao foi possivel apagar");
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG, "SD apagado: %s", rel);
+    httpd_resp_sendstr(req, "ok");
+    return ESP_OK;
+}
+
+static esp_err_t fs_mkdir_handler(httpd_req_t *req)
+{
+    touch_activity();
+    char rel[FS_PATH_MAX], full[FS_PATH_MAX + 16];
+    if (!fs_get_path(req, rel, sizeof rel, full, sizeof full)) return ESP_FAIL;
+    if (rel[1] == '\0') { httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "caminho invalido"); return ESP_FAIL; }
+    if (mkdir(full, 0775) != 0 && errno != EEXIST) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "nao consegui criar a pasta");
+        return ESP_FAIL;
+    }
+    httpd_resp_sendstr(req, "ok");
+    return ESP_OK;
+}
+
+/* ---------------------------------------------------------------------
+ * Log do sistema via WiFi (GET /log + /api/log). wifi_export_log_start()
+ * (chamada no comeco do app_main) engancha o vprintf do ESP_LOG: tudo que
+ * iria pra serial tambem entra num anel de 32KB. A pagina /log consulta
+ * /api/log?since=N a cada 1s e recebe so o que e' novo (cabecalho X-Next
+ * = proximo offset). Nao substitui a serial no boot muito cedo (antes do
+ * app_main) nem apos o anel dar a volta (~20 min de log normal).
+ * --------------------------------------------------------------------- */
+#include <stdarg.h>
+#if WIFI_LOG_ENABLED
+#define LOG_RING_SIZE (32 * 1024)
+#else
+#define LOG_RING_SIZE (64)        /* desligado: anel minimo, nada e capturado */
+#endif
+#define LOG_LINE_MAX  (512)
+
+static char              s_log_ring[LOG_RING_SIZE];
+static volatile uint32_t s_log_total = 0;            /* bytes escritos desde o boot (monotonico) */
+static portMUX_TYPE      s_log_mux = portMUX_INITIALIZER_UNLOCKED;
+static vprintf_like_t    s_log_prev = NULL;
+
+static int wifi_log_vprintf(const char *fmt, va_list ap)
+{
+    char tmp[LOG_LINE_MAX];
+    va_list ap2;
+    va_copy(ap2, ap);
+    int n = vsnprintf(tmp, sizeof tmp, fmt, ap2);
+    va_end(ap2);
+    if (n > 0) {
+        if (n >= (int)sizeof tmp) { n = (int)sizeof tmp - 1; tmp[n - 1] = '\n'; }
+        portENTER_CRITICAL(&s_log_mux);
+        uint32_t t = s_log_total;
+        for (int i = 0; i < n; i++) s_log_ring[(t + (uint32_t)i) % LOG_RING_SIZE] = tmp[i];
+        s_log_total = t + (uint32_t)n;
+        portEXIT_CRITICAL(&s_log_mux);
+    }
+    return s_log_prev ? s_log_prev(fmt, ap) : vprintf(fmt, ap);
+}
+
+void wifi_export_log_start(void)
+{
+#if !WIFI_LOG_ENABLED
+    return;                                    /* captura de log desligada (config.h) */
+#endif
+    if (s_log_prev) return;                    /* ja instalado */
+    s_log_prev = esp_log_set_vprintf(wifi_log_vprintf);
+    if (!s_log_prev) s_log_prev = vprintf;
+}
+
+static esp_err_t logview_get_handler(httpd_req_t *req)
+{
+    touch_activity();
+    httpd_resp_set_type(req, "text/html");
+    return httpd_resp_send(req, logview_html_start, HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t api_log_handler(httpd_req_t *req)
+{
+    touch_activity();
+    char query[48], sv[16] = {0};
+    uint32_t since = 0;
+    if (httpd_req_get_url_query_str(req, query, sizeof query) == ESP_OK &&
+        httpd_query_key_value(query, "since", sv, sizeof sv) == ESP_OK) {
+        since = (uint32_t)strtoul(sv, NULL, 10);
+    }
+    portENTER_CRITICAL(&s_log_mux);
+    uint32_t total = s_log_total;
+    portEXIT_CRITICAL(&s_log_mux);
+
+    if (since > total) since = 0;                           /* reiniciou */
+    if (total - since > LOG_RING_SIZE) since = total - LOG_RING_SIZE;   /* perdeu o comeco */
+
+    char nx[16];
+    snprintf(nx, sizeof nx, "%lu", (unsigned long)total);
+    httpd_resp_set_type(req, "text/plain; charset=utf-8");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_set_hdr(req, "X-Next", nx);
+
+    char chunk[512];
+    uint32_t pos = since;
+    while (pos < total) {
+        uint32_t n = total - pos;
+        if (n > sizeof chunk) n = sizeof chunk;
+        portENTER_CRITICAL(&s_log_mux);
+        for (uint32_t i = 0; i < n; i++) chunk[i] = s_log_ring[(pos + i) % LOG_RING_SIZE];
+        portEXIT_CRITICAL(&s_log_mux);
+        if (httpd_resp_send_chunk(req, chunk, (ssize_t)n) != ESP_OK) return ESP_FAIL;
+        pos += n;
+    }
+    return httpd_resp_send_chunk(req, NULL, 0);
+}
+
+/* ---------------------------------------------------------------------
+ * GET /api/coredump - baixa o coredump pendente DIRETO da flash (sem passar
+ * pelo SD). Existe porque o SD as vezes da' timeout e o coredump fica
+ * preso na flash; sem USB a unica saida e' o WiFi. Analisar no PC:
+ *   idf.py coredump-info --core coredump.bin   (ou espcoredump.py
+ *   info_corefile -c coredump.bin build/kartbox.elf)
+ * --------------------------------------------------------------------- */
+static esp_err_t coredump_get_handler(httpd_req_t *req)
+{
+    touch_activity();
+    size_t addr = 0, size = 0;
+    const esp_partition_t *part = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_COREDUMP, NULL);
+    if (!part || esp_core_dump_image_get(&addr, &size) != ESP_OK || size == 0) {
+        httpd_resp_set_status(req, "404 Not Found");
+        httpd_resp_sendstr(req, "sem coredump pendente na flash");
+        return ESP_OK;
+    }
+    httpd_resp_set_type(req, "application/octet-stream");
+    httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=\"coredump.bin\"");
+    uint8_t *buf = malloc(1024);
+    if (!buf) { httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "sem memoria"); return ESP_FAIL; }
+    size_t off = 0;
+    esp_err_t res = ESP_OK;
+    while (off < size) {
+        size_t n = (size - off) > 1024 ? 1024 : (size - off);
+        if (esp_partition_read(part, off, buf, n) != ESP_OK ||
+            httpd_resp_send_chunk(req, (const char *)buf, (ssize_t)n) != ESP_OK) { res = ESP_FAIL; break; }
+        off += n;
+        touch_activity();
+    }
+    free(buf);
+    if (res == ESP_OK) httpd_resp_send_chunk(req, NULL, 0);
+    else httpd_resp_sendstr_chunk(req, NULL);
+    return res;
+}
+
 static esp_err_t start_http_server(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.lru_purge_enable = true;
-    config.max_uri_handlers = 20; /* default (8) nao sobra pra APIs + OTA + A-GPS + analise + evolucao */
+    config.max_uri_handlers = 28; /* default (8) nao sobra pra APIs + OTA + A-GPS + analise + evolucao */
     config.stack_size = 8192; /* handlers com snprintf/JSON/fopen estouram os 4096 default */
 
     esp_err_t err = httpd_start(&s_httpd, &config);
@@ -1499,6 +1930,16 @@ static esp_err_t start_http_server(void)
     const httpd_uri_t evol_uri      = { .uri = "/evolucao",     .method = HTTP_GET,   .handler = evolution_get_handler };
     const httpd_uri_t api_sess_uri  = { .uri = "/api/sessions", .method = HTTP_GET,   .handler = api_sessions_handler };
     const httpd_uri_t api_laps_uri  = { .uri = "/api/laps",     .method = HTTP_GET,   .handler = api_laps_handler };
+    const httpd_uri_t api_gps_uri   = { .uri = "/api/gps",      .method = HTTP_GET,   .handler = api_gps_handler };
+    const httpd_uri_t fs_page_uri   = { .uri = "/arquivos",     .method = HTTP_GET,   .handler = explorer_get_handler };
+    const httpd_uri_t fs_list_uri   = { .uri = "/api/fs",       .method = HTTP_GET,   .handler = fs_list_handler };
+    const httpd_uri_t fs_get_uri    = { .uri = "/api/fs/get",   .method = HTTP_GET,   .handler = fs_get_handler };
+    const httpd_uri_t fs_put_uri    = { .uri = "/api/fs/put",   .method = HTTP_POST,  .handler = fs_put_handler };
+    const httpd_uri_t fs_rm_uri     = { .uri = "/api/fs/rm",    .method = HTTP_POST,  .handler = fs_rm_handler };
+    const httpd_uri_t log_page_uri  = { .uri = "/log",          .method = HTTP_GET,   .handler = logview_get_handler };
+    const httpd_uri_t log_api_uri   = { .uri = "/api/log",      .method = HTTP_GET,   .handler = api_log_handler };
+    const httpd_uri_t core_uri      = { .uri = "/api/coredump", .method = HTTP_GET,   .handler = coredump_get_handler };
+    const httpd_uri_t fs_mkdir_uri  = { .uri = "/api/fs/mkdir", .method = HTTP_POST,  .handler = fs_mkdir_handler };
     httpd_register_uri_handler(s_httpd, &ota_uri);
     httpd_register_uri_handler(s_httpd, &agps_uri);
     httpd_register_uri_handler(s_httpd, &agps_dl_uri);
@@ -1506,6 +1947,16 @@ static esp_err_t start_http_server(void)
     httpd_register_uri_handler(s_httpd, &evol_uri);
     httpd_register_uri_handler(s_httpd, &api_sess_uri);
     httpd_register_uri_handler(s_httpd, &api_laps_uri);
+    httpd_register_uri_handler(s_httpd, &api_gps_uri);
+    httpd_register_uri_handler(s_httpd, &fs_page_uri);
+    httpd_register_uri_handler(s_httpd, &fs_list_uri);
+    httpd_register_uri_handler(s_httpd, &fs_get_uri);
+    httpd_register_uri_handler(s_httpd, &fs_put_uri);
+    httpd_register_uri_handler(s_httpd, &fs_rm_uri);
+    httpd_register_uri_handler(s_httpd, &fs_mkdir_uri);
+    httpd_register_uri_handler(s_httpd, &core_uri);
+    httpd_register_uri_handler(s_httpd, &log_page_uri);
+    httpd_register_uri_handler(s_httpd, &log_api_uri);
     httpd_register_uri_handler(s_httpd, &index_uri);
     httpd_register_uri_handler(s_httpd, &download_uri);
     httpd_register_uri_handler(s_httpd, &upload_uri);
@@ -1607,6 +2058,8 @@ static void wifi_sta_event_handler(void *arg, esp_event_base_t event_base,
         s_sta_state = WIFI_STA_STATE_CONNECTED;
         ESP_LOGI(TAG, "STA: conectado em \"%s\", IP=%s", s_sta_ssid, s_sta_ip);
         if (s_wifi_event_group) xEventGroupSetBits(s_wifi_event_group, WIFI_STA_CONNECTED_BIT);
+        /* A-GPS automatico: baixa efemerides/hora e injeta no GPS (cold start rapido). */
+        if (!s_agps_busy) xTaskCreate(agps_auto_task, "agps_auto", 12288, NULL, 4, NULL);
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_SCAN_DONE) {
         /* Le os resultados JA' AQUI, o mais perto possivel do evento real
          * (ver comentario grande em s_scan_records acima) - nao deixa pra

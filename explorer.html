@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="pt-br"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KartBox - arquivos do SD</title>
+<style>
+:root{--bg:#0d0f0d;--surface:#141714;--line:#262626;--text:#f5f8f5;--muted:#7a847a;--green:#3ee07a;--gold:#ffd700;--cyan:#3ec6e0;--red:#ff5a5a}
+*{box-sizing:border-box}
+body{margin:0 auto;padding:20px;max-width:820px;background:var(--bg);color:var(--text);font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;line-height:1.5}
+h1{margin:0 0 12px;font-size:22px;color:var(--green);border-bottom:2px solid var(--line);padding-bottom:10px}
+a{color:var(--cyan);text-decoration:none}a:hover{text-decoration:underline}
+button,.btn{background:var(--surface);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font-size:14px;cursor:pointer;min-height:38px}
+button:active{background:#1d211d}
+button.del{color:var(--red)}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0}
+.crumbs{font-size:15px;word-break:break-all;margin:8px 0}
+.crumbs a{padding:0 2px}
+.space{height:8px;background:var(--surface);border:1px solid var(--line);border-radius:4px;overflow:hidden;margin:4px 0}
+.space i{display:block;height:100%;background:var(--green)}
+small,.muted{color:var(--muted)}
+ul{list-style:none;padding:0;margin:12px 0}
+li{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--green);border-radius:8px;padding:10px 12px;margin-bottom:8px;display:flex;gap:10px;align-items:center}
+li.dir{border-left-color:var(--gold)}
+li .nm{flex:1;min-width:0;word-break:break-all}
+li .meta{color:var(--muted);font-size:12px;white-space:nowrap;text-align:right}
+li .act{display:flex;gap:6px}
+#msg{min-height:22px;color:var(--gold);font-size:14px}
+#prog{display:none;margin:6px 0}
+#prog div{height:6px;background:var(--cyan);width:0}
+@media(max-width:520px){li{flex-wrap:wrap}li .meta{text-align:left}}
+</style></head><body>
+<h1>KartBox - arquivos do SD</h1>
+<p><a href="/">&larr; sessoes</a></p>
+<div class="crumbs" id="crumbs"></div>
+<div class="space"><i id="sp"></i></div>
+<small id="spt"></small>
+<div class="bar">
+<button id="bUp">&#11014; Enviar arquivos</button>
+<button id="bDir">&#128193; Nova pasta</button>
+<button id="bRef">&#8635; Atualizar</button>
+<input type="file" id="fi" multiple hidden>
+</div>
+<div id="prog"><div></div></div>
+<div id="msg"></div>
+<ul id="list"></ul>
+<script>
+var cur='/';
+var $=function(i){return document.getElementById(i)};
+function enc(p){return encodeURIComponent(p)}
+function esc(s){return s.replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+function msg(t){$('msg').textContent=t||''}
+function fmtSize(n){if(n<1024)return n+' B';if(n<1048576)return (n/1024).toFixed(1)+' KB';if(n<1073741824)return (n/1048576).toFixed(1)+' MB';return (n/1073741824).toFixed(2)+' GB'}
+function fmtDate(t){if(!t)return '';var d=new Date(t*1000);function z(x){return (x<10?'0':'')+x}
+ return z(d.getUTCDate())+'/'+z(d.getUTCMonth()+1)+'/'+d.getUTCFullYear()+' '+z(d.getUTCHours())+':'+z(d.getUTCMinutes())}
+function join(a,b){return a==='/'?'/'+b:a+'/'+b}
+function crumbs(){
+ var h='<a href="#/">SD</a>',acc='';
+ cur.split('/').filter(Boolean).forEach(function(s){acc+='/'+s;h+=' / <a href="#'+esc(acc)+'">'+esc(s)+'</a>'});
+ $('crumbs').innerHTML=h}
+function load(){
+ crumbs();msg('Carregando...');
+ fetch('/api/fs?p='+enc(cur)).then(function(r){if(!r.ok)throw new Error(r.status===503?'cartao SD nao montado':'erro '+r.status);return r.json()})
+ .then(function(j){
+  msg('');
+  if(j.total){var u=(j.total-j.free)/j.total*100;$('sp').style.width=u.toFixed(1)+'%';
+   $('spt').textContent=fmtSize(j.total-j.free)+' usados de '+fmtSize(j.total)+' ('+fmtSize(j.free)+' livres)'}
+  var it=j.items.slice().sort(function(a,b){return (b.d-a.d)||a.n.toLowerCase().localeCompare(b.n.toLowerCase())});
+  var h='';
+  if(cur!=='/'){var up=cur.replace(/\/[^\/]*$/,'')||'/';h+='<li class="dir"><span class="nm"><a href="#'+esc(up)+'">&#8593; ..</a></span></li>'}
+  it.forEach(function(x){
+   var p=join(cur,x.n);
+   if(x.d){h+='<li class="dir"><span class="nm">&#128193; <a href="#'+esc(p)+'">'+esc(x.n)+'</a></span>'+
+     '<span class="act"><button class="del" data-rm="'+esc(p)+'" data-dir="1">Apagar</button></span></li>'}
+   else{h+='<li><span class="nm"><a href="/api/fs/get?p='+enc(p)+'">'+esc(x.n)+'</a></span>'+
+     '<span class="meta">'+fmtSize(x.s)+'<br>'+fmtDate(x.t)+'</span>'+
+     '<span class="act"><a class="btn" href="/api/fs/get?p='+enc(p)+'">Baixar</a>'+
+     '<button class="del" data-rm="'+esc(p)+'">Apagar</button></span></li>'}
+  });
+  if(!it.length)h+='<li><span class="muted">pasta vazia</span></li>';
+  $('list').innerHTML=h;
+ }).catch(function(e){msg('Falha: '+e.message);$('list').innerHTML=''})}
+function route(){var h=decodeURIComponent(location.hash.replace(/^#/,''))||'/';cur=h.charAt(0)==='/'?h:'/';load()}
+window.addEventListener('hashchange',route);
+$('bRef').onclick=load;
+$('list').onclick=function(e){var b=e.target.closest('button[data-rm]');if(!b)return;
+ var p=b.getAttribute('data-rm');
+ if(!confirm('Apagar '+p+(b.getAttribute('data-dir')?' (so funciona se a pasta estiver vazia)':'')+' ? Nao tem volta.'))return;
+ fetch('/api/fs/rm?p='+enc(p),{method:'POST'}).then(function(r){if(!r.ok)throw new Error(r.status===409?'pasta nao esta vazia':'erro '+r.status);msg('Apagado.');load()}).catch(function(e){msg('Falha: '+e.message)})};
+$('bDir').onclick=function(){var n=prompt('Nome da nova pasta:');if(!n)return;
+ if(/[\/\\"%:*?<>|]/.test(n)||n==='.'||n==='..'){msg('Nome invalido.');return}
+ fetch('/api/fs/mkdir?p='+enc(join(cur,n)),{method:'POST'}).then(function(r){if(!r.ok)throw new Error('erro '+r.status);load()}).catch(function(e){msg('Falha: '+e.message)})};
+$('bUp').onclick=function(){$('fi').click()};
+$('fi').onchange=function(){var fs=Array.prototype.slice.call(this.files);this.value='';sendNext(fs,0)};
+function sendNext(fs,i){
+ if(i>=fs.length){$('prog').style.display='none';msg('Envio concluido ('+fs.length+').');load();return}
+ var f=fs[i],x=new XMLHttpRequest();
+ $('prog').style.display='block';
+ x.open('POST','/api/fs/put?p='+enc(join(cur,f.name)));
+ x.upload.onprogress=function(e){if(e.lengthComputable){$('prog').firstChild.style.width=(e.loaded/e.total*100)+'%'}msg('Enviando '+f.name+' ('+(i+1)+'/'+fs.length+')...')};
+ x.onload=function(){if(x.status===200)sendNext(fs,i+1);else{$('prog').style.display='none';msg('Falha em '+f.name+': '+x.responseText)}};
+ x.onerror=function(){$('prog').style.display='none';msg('Falha de rede em '+f.name)};
+ x.send(f)}
+route();
+</script></body></html>

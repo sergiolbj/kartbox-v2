@@ -50,6 +50,15 @@ idf_component_register(
         mdns
 )
 
+# Editor de pista (celular) embutido no firmware: GET /editor (wifi_export.c)
+# serve este HTML sem precisar de arquivo no cartao SD. Simbolo:
+# _binary_editor_html_start (TEXT = terminado em NUL).
+target_add_binary_data(${COMPONENT_LIB} "../editor.html" TEXT)
+# Explorer do SD (GET /arquivos): mesmo esquema, simbolo _binary_explorer_html_start.
+target_add_binary_data(${COMPONENT_LIB} "../explorer.html" TEXT)
+# Log ao vivo (GET /log): simbolo _binary_logview_html_start.
+target_add_binary_data(${COMPONENT_LIB} "../logview.html" TEXT)
+
 # GCC e paranoico com snprintf("%s/%s", dir, de->d_name) — d_name em teoria
 # pode ter ate 255 bytes (FAT), entao ele sempre acha que pode truncar,
 # mesmo com buffer de sobra pro caso real. Warning vira erro por causa do

@@ -21,6 +21,7 @@
 #include "sd_logger.h"
 #include "ble_telemetry.h"
 #include "wifi_export.h"
+#include "kb_pure.h"
 #include "battery.h"
 #include "display_init.h"
 
@@ -196,9 +197,9 @@ static lv_obj_t *s_tab_lbl_pista, *s_tab_lbl_race, *s_tab_lbl_laps, *s_tab_lbl_c
  * corrida, modo pen drive, wifi AP/STA inteiro e BLE tudo empilhado -
  * usabilidade ruim (usuario relatou). Mesmo padrao de show/hide da tab
  * bar principal (ver show_tab), so que num segundo nivel. Ordem:
- * 0=SISTEMA 1=CORRIDA 2=WIFI 3=BLE. */
-static lv_obj_t *s_cfgsub_content[4];
-static lv_obj_t *s_cfgsub_lbl[4];
+ * 0=SISTEMA 1=TELA 2=CORRIDA 3=REDES(WiFi+BLE) 4=DADOS. */
+static lv_obj_t *s_cfgsub_content[5];
+static lv_obj_t *s_cfgsub_lbl[5];
 
 /* Widgets da aba PISTA */
 static lv_obj_t *s_pista_name_ta;
@@ -242,7 +243,6 @@ static lv_obj_t *s_wifi_mode_sw, *s_wifi_mode_status_lbl, *s_wifi_sta_box, *s_wi
 static lv_obj_t *s_wifi_scan_dd, *s_wifi_sta_pass_ta, *s_wifi_sta_status_lbl;
 static lv_obj_t *s_sta_connect_lbl; /* label do botao dinamico Conectar/Desconectar (modo Cliente) */
 static lv_obj_t *s_usb_btn_label;
-static lv_obj_t *s_utc_value_label, *s_gate_value_label, *s_min_lap_value_label;
 static lv_obj_t *s_ble_name_ta, *s_wifi_pass_ta, *s_keyboard;
 static lv_obj_t *s_keyboard_scrim;
 
@@ -1128,84 +1128,227 @@ static void build_laps_tab(lv_obj_t *parent)
 /* ----------------------------------------------------------------------
  * Aba Config
  * ---------------------------------------------------------------------- */
-static void update_utc_label(void)
+/* ----------------------------------------------------------------------
+ * Ajustes por LISTA DE VALORES PRONTOS
+ *
+ * Antes: botoes - / + com passo fixo. Agora cada ajuste e' um menu com os
+ * valores que fazem sentido. Se o valor salvo (NVS) nao estiver na lista
+ * (ex: ajustado antes pelo botao -/+), ele aparece como opcao extra na
+ * posicao certa - nada some nem muda sozinho.
+ * ---------------------------------------------------------------------- */
+#define PRESET_MAX 40
+
+typedef struct preset_dd {
+    lv_obj_t      *dd;
+    int32_t        vals[PRESET_MAX];
+    int            n;
+    const int32_t *base;               /* lista base, ordem crescente */
+    int            base_n;
+    void         (*fmt)(char *buf, size_t n, int32_t v);
+    int32_t      (*get)(void);
+    void         (*apply)(int32_t v);
+    void         (*after)(void);       /* opcional: acerta ajustes dependentes */
+} preset_dd_t;
+
+/* Formata segundos: "45s", "1min", "2min30s", "nunca". */
+static void fmt_duration_s(char *buf, size_t n, uint32_t sec, bool zero_is_never)
 {
-    int16_t off = settings_get_utc_offset_min();
-    int a = abs((int)off);
-    /* sinal explicito: "%+d" em off/60 perdia o '-' quando a hora era 0 (-30min) */
-    lv_label_set_text_fmt(s_utc_value_label, "UTC%c%d:%02d", off < 0 ? '-' : '+', a / 60, a % 60);
+    if (zero_is_never && sec == 0) { snprintf(buf, n, "nunca"); return; }
+    uint32_t m = sec / 60, r = sec % 60;
+    if (m == 0)      snprintf(buf, n, "%us", (unsigned)r);
+    else if (r == 0) snprintf(buf, n, "%umin", (unsigned)m);
+    else             snprintf(buf, n, "%umin%02us", (unsigned)m, (unsigned)r);
 }
 
-static void update_gate_label(void)
+static void preset_dd_refresh(preset_dd_t *p)
 {
-    lv_label_set_text_fmt(s_gate_value_label, "%.0fm", (double)settings_get_gate_radius_m());
+    int32_t cur = p->get();
+    bool placed = false;
+    p->n = 0;
+    for (int i = 0; i < p->base_n && p->n < PRESET_MAX - 1; i++) {
+        if (!placed && cur < p->base[i]) { p->vals[p->n++] = cur; placed = true; }
+        if (p->base[i] == cur) placed = true;
+        p->vals[p->n++] = p->base[i];
+    }
+    if (!placed && p->n < PRESET_MAX) p->vals[p->n++] = cur;
+
+    char opts[PRESET_MAX * 24];
+    size_t used = 0;
+    int sel = 0;
+    opts[0] = '\0';
+    for (int i = 0; i < p->n; i++) {
+        char tmp[24];
+        p->fmt(tmp, sizeof(tmp), p->vals[i]);
+        int w = snprintf(opts + used, sizeof(opts) - used, "%s%s", i ? "\n" : "", tmp);
+        if (w < 0 || (size_t)w >= sizeof(opts) - used) { p->n = i; break; }
+        used += (size_t)w;
+        if (p->vals[i] == cur) sel = i;
+    }
+    lv_dropdown_set_options(p->dd, opts);
+    lv_dropdown_set_selected(p->dd, (uint32_t)sel);
 }
 
-static void utc_minus_cb(lv_event_t *e)
+static void preset_dd_changed_cb(lv_event_t *e)
 {
-    (void)e;
-    int16_t v = settings_get_utc_offset_min() - 15;
-    if (v < -720) v = -720; /* limites razoaveis (+-12h) */
-    settings_set_utc_offset_min(v);
-    gps_set_utc_offset_min(v);
-    update_utc_label();
+    preset_dd_t *p = (preset_dd_t *)lv_event_get_user_data(e);
+    int i = (int)lv_dropdown_get_selected(p->dd);
+    if (i < 0 || i >= p->n) return;
+    p->apply(p->vals[i]);
+    if (p->after) p->after();
 }
 
-static void utc_plus_cb(lv_event_t *e)
+/* Texto de ajuda de 1 linha (fonte pequena, cinza) */
+static lv_obj_t *make_hint(lv_obj_t *parent, const char *txt)
 {
-    (void)e;
-    int16_t v = settings_get_utc_offset_min() + 15;
-    if (v > 840) v = 840; /* ate UTC+14 */
-    settings_set_utc_offset_min(v);
-    gps_set_utc_offset_min(v);
-    update_utc_label();
+    lv_obj_t *l = lv_label_create(parent);
+    lv_obj_set_width(l, lv_pct(100));
+    lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_WRAP);
+    lv_obj_set_style_text_font(l, &font_kartbox_sm, 0);
+    lv_obj_set_style_text_color(l, COLOR_MUTED2, 0);
+    lv_label_set_text(l, txt);
+    return l;
 }
 
-static void gate_minus_cb(lv_event_t *e)
+/* Linha: titulo a esquerda, menu a direita, ajuda embaixo. */
+static lv_obj_t *make_preset_row(lv_obj_t *parent, const char *title, const char *hint, preset_dd_t *p)
 {
-    (void)e;
-    float v = settings_get_gate_radius_m() - 1.0f;
-    if (v < 5.0f) v = 5.0f; /* abaixo disso o GPS de consumo nao tem precisao confiavel */
-    settings_set_gate_radius_m(v);
-    gps_set_gate_radius_m(v);
-    update_gate_label();
+    lv_obj_t *box = bare(parent);
+    lv_obj_set_size(box, lv_pct(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_pad_right(box, 14, 0);
+    lv_obj_set_flex_flow(box, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(box, 2, 0);
+
+    lv_obj_t *row = bare(box);
+    lv_obj_set_size(row, lv_pct(100), 46);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    lv_obj_t *lbl = lv_label_create(row);
+    lv_obj_set_style_text_font(lbl, &font_kartbox_lg, 0);
+    lv_obj_set_style_text_color(lbl, COLOR_MUTED, 0);
+    lv_label_set_text(lbl, title);
+
+    p->dd = lv_dropdown_create(row);
+    lv_obj_set_size(p->dd, 190, 44);
+    lv_obj_set_style_text_font(p->dd, &font_kartbox_lg, 0);
+    lv_obj_add_event_cb(p->dd, preset_dd_changed_cb, LV_EVENT_VALUE_CHANGED, p);
+    preset_dd_refresh(p);
+
+    if (hint && hint[0]) make_hint(box, hint);
+    return box;
 }
 
-static void gate_plus_cb(lv_event_t *e)
+/* ---- Brilho (aplica ao vivo) ---- */
+static const int32_t BRIGHT_BASE[] = { 20, 30, 40, 50, 60, 70, 80, 90, 100 };
+static void    fmt_bright(char *b, size_t n, int32_t v) { snprintf(b, n, "%d%%", (int)v); }
+static int32_t get_bright(void) { return (int32_t)settings_get_brightness(); }
+static void    apply_bright(int32_t v)
 {
-    (void)e;
-    float v = settings_get_gate_radius_m() + 1.0f;
-    if (v > 30.0f) v = 30.0f;
-    settings_set_gate_radius_m(v);
-    gps_set_gate_radius_m(v);
-    update_gate_label();
+    settings_set_brightness((uint8_t)v);
+    display_set_brightness(settings_get_brightness());
+}
+static preset_dd_t p_bright = { .base = BRIGHT_BASE, .base_n = 9,
+    .fmt = fmt_bright, .get = get_bright, .apply = apply_bright };
+
+/* ---- Protetor de tela: escurecer / apagar (apagar sempre DEPOIS de escurecer) ---- */
+static const int32_t SCR_DIM_BASE[] = { 15, 30, 45, 60, 120, 180, 300, 600 };
+static const int32_t SCR_OFF_BASE[] = { 0, 60, 120, 300, 600, 900, 1800 };
+static preset_dd_t p_scr_dim, p_scr_off;
+
+static void fmt_secs(char *b, size_t n, int32_t v) { fmt_duration_s(b, n, (uint32_t)v, true); }
+static int32_t get_scr_dim(void) { return (int32_t)settings_get_screensaver_dim_s(); }
+static int32_t get_scr_off(void) { return (int32_t)settings_get_screensaver_off_s(); }
+static void apply_scr_dim(int32_t v) { settings_set_screensaver_dim_s((uint16_t)v); }
+static void apply_scr_off(int32_t v) { settings_set_screensaver_off_s((uint16_t)v); }
+
+/* "escurecer" >= "apagar": empurra o "apagar" pro proximo valor acima */
+static void after_scr_dim(void)
+{
+    int dim = (int)settings_get_screensaver_dim_s();
+    int off = (int)settings_get_screensaver_off_s();
+    if (off != 0 && off <= dim) {
+        int nv = 0; /* 0 = nunca, se nao houver valor maior */
+        for (int i = 0; i < (int)(sizeof(SCR_OFF_BASE) / sizeof(SCR_OFF_BASE[0])); i++) {
+            if (SCR_OFF_BASE[i] > dim) { nv = SCR_OFF_BASE[i]; break; }
+        }
+        settings_set_screensaver_off_s((uint16_t)nv);
+        preset_dd_refresh(&p_scr_off);
+    }
 }
 
-static void update_min_lap_label(void)
+/* "apagar" <= "escurecer": puxa o "escurecer" pro valor anterior da lista */
+static void after_scr_off(void)
 {
-    uint32_t ms = settings_get_min_lap_time_ms();
-    lv_label_set_text_fmt(s_min_lap_value_label, "%.0fs", ms / 1000.0);
+    int dim = (int)settings_get_screensaver_dim_s();
+    int off = (int)settings_get_screensaver_off_s();
+    if (off != 0 && off <= dim) {
+        int nv = SCR_DIM_BASE[0];
+        for (int i = 0; i < (int)(sizeof(SCR_DIM_BASE) / sizeof(SCR_DIM_BASE[0])); i++) {
+            if (SCR_DIM_BASE[i] < off) nv = SCR_DIM_BASE[i];
+        }
+        settings_set_screensaver_dim_s((uint16_t)nv);
+        preset_dd_refresh(&p_scr_dim);
+    }
 }
 
-static void min_lap_minus_cb(lv_event_t *e)
-{
-    (void)e;
-    uint32_t v = settings_get_min_lap_time_ms();
-    if (v > 5000) v -= 1000;
-    settings_set_min_lap_time_ms(v);
-    gps_set_min_lap_time_ms(v);
-    update_min_lap_label();
-}
+static preset_dd_t p_scr_dim = { .base = SCR_DIM_BASE, .base_n = 8,
+    .fmt = fmt_secs, .get = get_scr_dim, .apply = apply_scr_dim, .after = after_scr_dim };
+static preset_dd_t p_scr_off = { .base = SCR_OFF_BASE, .base_n = 7,
+    .fmt = fmt_secs, .get = get_scr_off, .apply = apply_scr_off, .after = after_scr_off };
 
-static void min_lap_plus_cb(lv_event_t *e)
+/* ---- Fuso horario (minutos; de hora em hora, UTC-12 a UTC+14) ---- */
+static const int32_t UTC_BASE[] = {
+    -720, -660, -600, -540, -480, -420, -360, -300, -240, -180, -120, -60,
+    0, 60, 120, 180, 240, 300, 360, 420, 480, 540, 600, 660, 720, 780, 840 };
+static void fmt_utc(char *b, size_t n, int32_t v)
 {
-    (void)e;
-    uint32_t v = settings_get_min_lap_time_ms();
-    if (v < 120000) v += 1000;
-    settings_set_min_lap_time_ms(v);
-    gps_set_min_lap_time_ms(v);
-    update_min_lap_label();
+    int a = (int)(v < 0 ? -v : v);
+    snprintf(b, n, "UTC%c%d:%02d", v < 0 ? '-' : '+', a / 60, a % 60);
 }
+static int32_t get_utc(void) { return (int32_t)settings_get_utc_offset_min(); }
+static void apply_utc(int32_t v)
+{
+    settings_set_utc_offset_min((int16_t)v);
+    gps_set_utc_offset_min((int16_t)v);
+}
+static preset_dd_t p_utc = { .base = UTC_BASE, .base_n = 27,
+    .fmt = fmt_utc, .get = get_utc, .apply = apply_utc };
+
+/* ---- Raio do gate (m) ---- */
+static const int32_t GATE_BASE[] = { 5, 8, 10, 12, 15, 18, 20, 25, 30 };
+static void fmt_gate(char *b, size_t n, int32_t v) { snprintf(b, n, "%dm", (int)v); }
+static int32_t get_gate(void) { return (int32_t)lroundf(settings_get_gate_radius_m()); }
+static void apply_gate(int32_t v)
+{
+    settings_set_gate_radius_m((float)v);
+    gps_set_gate_radius_m((float)v);
+}
+static preset_dd_t p_gate = { .base = GATE_BASE, .base_n = 9,
+    .fmt = fmt_gate, .get = get_gate, .apply = apply_gate };
+
+/* ---- Tempo minimo de volta (ms) ---- */
+static const int32_t MINLAP_BASE[] = { 5000, 10000, 15000, 20000, 30000, 45000, 60000, 90000, 120000 };
+static void fmt_minlap(char *b, size_t n, int32_t v)
+{
+    if (v % 1000 == 0) snprintf(b, n, "%ds", (int)(v / 1000));
+    else               snprintf(b, n, "%.1fs", (double)v / 1000.0);
+}
+static int32_t get_minlap(void) { return (int32_t)settings_get_min_lap_time_ms(); }
+static void apply_minlap(int32_t v)
+{
+    settings_set_min_lap_time_ms((uint32_t)v);
+    gps_set_min_lap_time_ms((uint32_t)v);
+}
+static preset_dd_t p_minlap = { .base = MINLAP_BASE, .base_n = 9,
+    .fmt = fmt_minlap, .get = get_minlap, .apply = apply_minlap };
+
+/* ---- Escala da barra de LED do delta (ms que acendem a barra inteira) ---- */
+static const int32_t LEDSCALE_BASE[] = { 500, 750, 1000, 1250, 1500, 1750, 2000, 2250, 2500, 2750, 3000 };
+static void fmt_ledscale(char *b, size_t n, int32_t v) { snprintf(b, n, "%.2fs", (double)v / 1000.0); }
+static int32_t get_ledscale(void) { return (int32_t)settings_get_led_scale_ms(); }
+static void apply_ledscale(int32_t v) { settings_set_led_scale_ms((uint16_t)v); }
+static preset_dd_t p_ledscale = { .base = LEDSCALE_BASE, .base_n = 11,
+    .fmt = fmt_ledscale, .get = get_ledscale, .apply = apply_ledscale };
 
 /* Restaura FUSO/GATE/MIN VOLTA pros defaults de fabrica (config.h). Nao
  * mexe em pista/setores/nome BLE/senha WiFi de proposito - o usuario
@@ -1223,9 +1366,9 @@ static void restore_defaults_cb(lv_event_t *e)
     gps_set_gate_radius_m(GATE_RADIUS_M);
     gps_set_min_lap_time_ms(MIN_LAP_TIME_MS);
 
-    update_utc_label();
-    update_gate_label();
-    update_min_lap_label();
+    preset_dd_refresh(&p_utc);
+    preset_dd_refresh(&p_gate);
+    preset_dd_refresh(&p_minlap);
 
     ui_show_toast("Configuracoes restauradas", 2000);
 }
@@ -1237,65 +1380,6 @@ static void auto_session_switch_cb(lv_event_t *e)
     bool on = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
     settings_set_auto_session(on ? 1 : 0);
     gps_set_auto_session(on);
-}
-
-static lv_obj_t *make_stepper_row(lv_obj_t *parent, const char *title,
-                                   lv_event_cb_t minus_cb, lv_event_cb_t plus_cb,
-                                   lv_obj_t **out_value_label)
-{
-    lv_obj_t *row = bare(parent);
-    lv_obj_set_size(row, lv_pct(100), 46);
-    /* Margem de seguranca a direita: aba Config precisa rolar (mais linhas
-     * do que cabem na tela) e a scrollbar reserva alguns px na borda
-     * direita - sem essa folga o botao "+" (colado na borda via
-     * SPACE_BETWEEN) ficava cortado. */
-    lv_obj_set_style_pad_right(row, 14, 0);
-    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-
-    lv_obj_t *lbl = lv_label_create(row);
-    lv_obj_set_style_text_font(lbl, &font_kartbox_lg, 0);
-    lv_obj_set_style_text_color(lbl, COLOR_MUTED, 0);
-    lv_label_set_text(lbl, title);
-
-    lv_obj_t *ctrl = bare(row);
-    /* Tamanho explicito de conteudo - sem isso o grupo pode nao abraçar
-     * os 2 botoes + valor corretamente e o botao da direita fica cortado. */
-    lv_obj_set_size(ctrl, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(ctrl, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(ctrl, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(ctrl, 12, 0);
-
-    lv_obj_t *btn_minus = lv_button_create(ctrl);
-    lv_obj_set_size(btn_minus, 46, 42);
-    style_action_button(btn_minus, lv_color_make(0x12, 0x28, 0x38), lv_color_make(0x1A, 0x38, 0x4C));
-    lv_obj_add_event_cb(btn_minus, minus_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *minus_lbl = lv_label_create(btn_minus);
-    lv_obj_center(minus_lbl);
-    lv_obj_set_style_text_font(minus_lbl, &font_kartbox_lg, 0);
-    lv_label_set_text(minus_lbl, "-");
-
-    lv_obj_t *val = lv_label_create(ctrl);
-    lv_obj_set_style_text_font(val, &font_kartbox_lg, 0);
-    lv_obj_set_style_text_color(val, COLOR_TEXT, 0);
-    /* 90px nao cabia "UTC-3:00" (9 chars) numa linha so - quebrava em
-     * 2 linhas e crescia a altura da linha inteira. 130px cobre o pior
-     * caso (ex: "UTC+12:00") sem quebrar. */
-    lv_obj_set_width(val, 130);
-    lv_obj_set_style_text_align(val, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_text(val, "--");
-
-    lv_obj_t *btn_plus = lv_button_create(ctrl);
-    lv_obj_set_size(btn_plus, 46, 42);
-    style_action_button(btn_plus, lv_color_make(0x12, 0x28, 0x38), lv_color_make(0x1A, 0x38, 0x4C));
-    lv_obj_add_event_cb(btn_plus, plus_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *plus_lbl = lv_label_create(btn_plus);
-    lv_obj_center(plus_lbl);
-    lv_obj_set_style_text_font(plus_lbl, &font_kartbox_lg, 0);
-    lv_label_set_text(plus_lbl, "+");
-
-    *out_value_label = val;
-    return row;
 }
 
 /* ----------------------------------------------------------------------
@@ -1403,139 +1487,14 @@ static void usb_btn_event_cb(lv_event_t *e)
     app_event_post(APP_EVT_USB_MODE_TOGGLE, EVT_SRC_TOUCH);
 }
 
-/* Escala da barra de LED do delta - stepper na CONFIG > CORRIDA, passos
- * de 250ms. O valor e' a magnitude que acende a barra INTEIRA; o label
- * mostra tambem quanto vale cada LED (escala/8). Aplica na hora (o
- * refresh le o setting a cada tick). */
-static lv_obj_t *s_led_scale_value_label;
-
-static void update_led_scale_label(void)
-{
-    uint16_t ms = settings_get_led_scale_ms();
-    lv_label_set_text_fmt(s_led_scale_value_label, "%.2fs (%ums/led)",
-                          (double)(ms / 1000.0), (unsigned)(ms / DELTA_LED_PER_SIDE));
-}
-
-static void led_scale_minus_cb(lv_event_t *e)
-{
-    (void)e;
-    int v = (int)settings_get_led_scale_ms() - 250;
-    settings_set_led_scale_ms((uint16_t)(v < 500 ? 500 : v));
-    update_led_scale_label();
-}
-
-static void led_scale_plus_cb(lv_event_t *e)
-{
-    (void)e;
-    int v = (int)settings_get_led_scale_ms() + 250;
-    settings_set_led_scale_ms((uint16_t)(v > 3000 ? 3000 : v));
-    update_led_scale_label();
-}
-
-/* Brilho do display - stepper na SISTEMA, passos de 10%, aplica AO VIVO
- * (feedback imediato) e persiste. Minimo 20% (ver settings.h). */
-static lv_obj_t *s_bright_value_label;
-
-static void update_bright_label(void)
-{
-    lv_label_set_text_fmt(s_bright_value_label, "%u%%", (unsigned)settings_get_brightness());
-}
-
-static void bright_minus_cb(lv_event_t *e)
-{
-    (void)e;
-    int v = (int)settings_get_brightness() - 10;
-    settings_set_brightness((uint8_t)(v < 20 ? 20 : v));
-    display_set_brightness(settings_get_brightness());
-    update_bright_label();
-}
-
-static void bright_plus_cb(lv_event_t *e)
-{
-    (void)e;
-    int v = (int)settings_get_brightness() + 10;
-    settings_set_brightness((uint8_t)(v > 100 ? 100 : v));
-    display_set_brightness(settings_get_brightness());
-    update_bright_label();
-}
-
-/* Protetor de tela - switch de ativar + 2 steppers (escurecer/apagar).
- * Aplica so no NVS; o refresh_timer_cb (screensaver_tick) le e age. */
-static lv_obj_t *s_scr_dim_value_label;
-static lv_obj_t *s_scr_off_value_label;
-
-/* Formata segundos de forma legivel: "45s", "1min", "2min30s", "nunca". */
-static void fmt_duration_s(char *buf, size_t n, uint32_t sec, bool zero_is_never)
-{
-    if (zero_is_never && sec == 0) { snprintf(buf, n, "nunca"); return; }
-    uint32_t m = sec / 60, s = sec % 60;
-    if (m == 0)      snprintf(buf, n, "%us", (unsigned)s);
-    else if (s == 0) snprintf(buf, n, "%umin", (unsigned)m);
-    else             snprintf(buf, n, "%umin%02us", (unsigned)m, (unsigned)s);
-}
-
-static void update_scr_dim_label(void)
-{
-    char b[24];
-    fmt_duration_s(b, sizeof(b), settings_get_screensaver_dim_s(), false);
-    lv_label_set_text(s_scr_dim_value_label, b);
-}
-
-static void update_scr_off_label(void)
-{
-    char b[24];
-    fmt_duration_s(b, sizeof(b), settings_get_screensaver_off_s(), true);
-    lv_label_set_text(s_scr_off_value_label, b);
-}
-
+/* Protetor de tela: switch de ativar. Tempos de escurecer/apagar sao menus
+ * de valores prontos (p_scr_dim / p_scr_off). Aplica so no NVS; o
+ * refresh_timer_cb (screensaver_tick) le e age. */
 static void scr_enabled_switch_cb(lv_event_t *e)
 {
     bool on = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
     settings_set_screensaver_enabled(on ? 1 : 0);
-    /* desligou: garante tela acesa ja (nao espera o proximo tick) */
     if (!on) ui_screensaver_notify_activity();
-}
-
-static void scr_dim_minus_cb(lv_event_t *e)
-{
-    (void)e;
-    int v = (int)settings_get_screensaver_dim_s() - SCREENSAVER_DIM_STEP_S;
-    settings_set_screensaver_dim_s((uint16_t)(v < SCREENSAVER_DIM_MIN_S ? SCREENSAVER_DIM_MIN_S : v));
-    update_scr_dim_label();
-}
-
-static void scr_dim_plus_cb(lv_event_t *e)
-{
-    (void)e;
-    int v = (int)settings_get_screensaver_dim_s() + SCREENSAVER_DIM_STEP_S;
-    if (v > SCREENSAVER_DIM_MAX_S) v = SCREENSAVER_DIM_MAX_S;
-    settings_set_screensaver_dim_s((uint16_t)v);
-    /* "apagar" nunca pode ficar antes de "escurecer" (o estagio dim seria pulado) */
-    int off = (int)settings_get_screensaver_off_s();
-    if (off != 0 && off <= v) {
-        settings_set_screensaver_off_s((uint16_t)(v + SCREENSAVER_OFF_STEP_S));
-        update_scr_off_label();
-    }
-    update_scr_dim_label();
-}
-
-static void scr_off_minus_cb(lv_event_t *e)
-{
-    (void)e;
-    /* Passo pra baixo; ao chegar no minimo, cai pra 0 = "nunca". */
-    int v = (int)settings_get_screensaver_off_s() - SCREENSAVER_OFF_STEP_S;
-    if (v < SCREENSAVER_OFF_STEP_S || v <= (int)settings_get_screensaver_dim_s()) v = 0; /* abaixo do dim = "nunca" */
-    settings_set_screensaver_off_s((uint16_t)v);
-    update_scr_off_label();
-}
-
-static void scr_off_plus_cb(lv_event_t *e)
-{
-    (void)e;
-    int v = (int)settings_get_screensaver_off_s() + SCREENSAVER_OFF_STEP_S;
-    if (v <= (int)settings_get_screensaver_dim_s()) v = (int)settings_get_screensaver_dim_s() + SCREENSAVER_OFF_STEP_S;
-    settings_set_screensaver_off_s((uint16_t)(v > SCREENSAVER_OFF_MAX_S ? SCREENSAVER_OFF_MAX_S : v));
-    update_scr_off_label();
 }
 
 /* Backup/restore de config - I/O de SD roda no dispatcher (main), o
@@ -1694,18 +1653,13 @@ static void pista_save_cb(lv_event_t *e)
      * dar o motivo em vez do generico "Erro ao salvar no SD". */
     const char *name = lv_textarea_get_text(s_pista_name_ta);
     if (name && name[0]) {
-        size_t n = strlen(name);
-        if (n >= TRACK_NAME_MAX) {
+        /* mesma regra do track_manager (kb_name_check, testada no PC) */
+        int why = kb_name_check(name, TRACK_NAME_MAX);
+        if (why == KB_NAME_TOO_LONG) {
             ui_show_toast("Nome muito longo (max 31 caracteres)", 2500);
             return;
         }
-        bool bad = (strcmp(name, ".") == 0 || strcmp(name, "..") == 0 ||
-                    name[n - 1] == ' ' || name[n - 1] == '.');
-        for (size_t i = 0; i < n && !bad; i++) {
-            unsigned char ch = (unsigned char)name[i];
-            if (ch < 0x20 || strchr("/\\:*?\"<>|", ch)) bad = true;
-        }
-        if (bad) {
+        if (why == KB_NAME_BAD) {
             ui_show_toast("Nome invalido: nao use / \\ : * ? \" < > | nem terminar com espaco ou ponto", 3500);
             return;
         }
@@ -2062,7 +2016,7 @@ static void build_pista_tab(lv_obj_t *parent)
  * ---------------------------------------------------------------------- */
 static void show_config_subtab(int idx)
 {
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 5; i++) {
         if (i == idx) {
             lv_obj_clear_flag(s_cfgsub_content[i], LV_OBJ_FLAG_HIDDEN);
             lv_obj_set_style_text_color(s_cfgsub_lbl[i], COLOR_PRIMARY, 0);
@@ -2082,14 +2036,50 @@ static void config_subtab_click_cb(lv_event_t *e)
     show_config_subtab(idx);
 }
 
+/* Pagina rolavel de uma sub-aba da CONFIG (todas iguais; so muda o conteudo). */
+static lv_obj_t *make_cfg_page(lv_obj_t *pages, int idx, bool hidden)
+{
+    lv_obj_t *col = bare(pages);
+    lv_obj_set_size(col, lv_pct(100), lv_pct(100));
+    lv_obj_set_style_pad_all(col, 14, 0);
+    lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(col, 10, 0);
+    lv_obj_add_flag(col, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(col, LV_DIR_VER);
+    if (hidden) lv_obj_add_flag(col, LV_OBJ_FLAG_HIDDEN);
+    s_cfgsub_content[idx] = col;
+    return col;
+}
+
+/* Linha fina divisoria + titulo de secao pequeno */
+static void make_cfg_divider(lv_obj_t *parent, const char *title, lv_color_t title_color)
+{
+    lv_obj_t *gap = bare(parent);
+    lv_obj_set_size(gap, lv_pct(100), 6);
+
+    lv_obj_t *line = bare(parent);
+    lv_obj_set_size(line, lv_pct(100), 1);
+    lv_obj_set_style_bg_color(line, COLOR_BORDER, 0);
+    lv_obj_set_style_bg_opa(line, LV_OPA_COVER, 0);
+
+    if (title && title[0]) {
+        lv_obj_t *t = lv_label_create(parent);
+        lv_obj_set_style_text_font(t, &font_kartbox_sm, 0);
+        lv_obj_set_style_text_color(t, title_color, 0);
+        lv_label_set_text(t, title);
+    }
+}
+
 static void build_config_tab(lv_obj_t *parent)
 {
     lv_obj_t *root = bare(parent);
     lv_obj_set_size(root, lv_pct(100), lv_pct(100));
     lv_obj_set_flex_flow(root, LV_FLEX_FLOW_COLUMN);
 
-    /* Sub-tab bar - reaproveita make_tab_btn() da barra principal (mesmo
-     * visual), so que dentro da propria aba Config. */
+    /* 5 sub-abas por assunto (antes SISTEMA tinha 13 itens numa rolagem so):
+     *   SISTEMA = diagnostico | TELA = brilho/tema/protetor
+     *   CORRIDA = fuso/gate/volta minima/LED/auto-sessao
+     *   REDES   = WiFi + BLE  | DADOS = backup, pen drive, apagar tudo */
     lv_obj_t *subbar = bare(root);
     lv_obj_set_size(subbar, lv_pct(100), 48);
     lv_obj_set_style_bg_color(subbar, COLOR_SURFACE, 0);
@@ -2099,9 +2089,11 @@ static void build_config_tab(lv_obj_t *parent)
     lv_obj_set_style_border_side(subbar, LV_BORDER_SIDE_BOTTOM, 0);
     lv_obj_set_flex_flow(subbar, LV_FLEX_FLOW_ROW);
 
-    static const char *subtab_names[4] = { "SISTEMA", "CORRIDA", "WIFI", "BLE" };
-    for (int i = 0; i < 4; i++) {
+    static const char *subtab_names[5] = { "SISTEMA", "TELA", "CORRIDA", "REDES", "DADOS" };
+    for (int i = 0; i < 5; i++) {
         lv_obj_t *btn = make_tab_btn(subbar, subtab_names[i], &s_cfgsub_lbl[i]);
+        /* 5 abas em 480px: o recuo lateral padrao nao cabe */
+        lv_obj_set_style_pad_hor(s_cfgsub_lbl[i], 3, 0);
         lv_obj_add_event_cb(btn, config_subtab_click_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
     }
 
@@ -2109,17 +2101,8 @@ static void build_config_tab(lv_obj_t *parent)
     lv_obj_set_width(pages, lv_pct(100));
     lv_obj_set_flex_grow(pages, 1);
 
-    /* ------------------------------------------------------------------
-     * SISTEMA - status GPS, uso do SD, modo pen drive, apagar tudo.
-     * ------------------------------------------------------------------ */
-    lv_obj_t *col_sys = bare(pages);
-    lv_obj_set_size(col_sys, lv_pct(100), lv_pct(100));
-    lv_obj_set_style_pad_all(col_sys, 14, 0);
-    lv_obj_set_flex_flow(col_sys, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(col_sys, 10, 0);
-    lv_obj_add_flag(col_sys, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_scroll_dir(col_sys, LV_DIR_VER);
-    s_cfgsub_content[0] = col_sys;
+    /* ---- SISTEMA: status GPS, RF, autoteste, SD, firmware ---- */
+    lv_obj_t *col_sys = make_cfg_page(pages, 0, false);
 
     lv_obj_t *gps_link_row = bare(col_sys);
     lv_obj_set_size(gps_link_row, lv_pct(100), 40);
@@ -2194,100 +2177,6 @@ static void build_config_tab(lv_obj_t *parent)
     lv_obj_set_style_radius(s_sd_usage_bar, 4, LV_PART_MAIN);
     lv_obj_set_style_radius(s_sd_usage_bar, 4, LV_PART_INDICATOR);
 
-    /* Tema de cor da UI - dropdown com as paletas de THEME_PALETTES.
-     * Ordem das opcoes DEVE casar com os indices da tabela (e com o
-     * comentario em settings.h). Sem opcao vermelha de proposito. */
-    lv_obj_t *theme_row = bare(col_sys);
-    lv_obj_set_size(theme_row, lv_pct(100), 48);
-    lv_obj_set_flex_flow(theme_row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(theme_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-
-    lv_obj_t *theme_lbl = lv_label_create(theme_row);
-    lv_obj_set_style_text_font(theme_lbl, &font_kartbox_lg, 0);
-    lv_obj_set_style_text_color(theme_lbl, COLOR_MUTED, 0);
-    lv_label_set_text(theme_lbl, "TEMA (cor da UI)");
-
-    lv_obj_t *theme_dd = lv_dropdown_create(theme_row);
-    lv_obj_set_size(theme_dd, 220, 44);
-    lv_obj_set_style_text_font(theme_dd, &font_kartbox_lg, 0);
-    lv_dropdown_set_options(theme_dd, "Verde\nAzul\nAmbar\nLaranja\nRoxo");
-    lv_dropdown_set_selected(theme_dd, settings_get_theme());
-    lv_obj_add_event_cb(theme_dd, theme_dd_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
-
-    lv_obj_t *usb_btn = lv_button_create(col_sys);
-    lv_obj_set_size(usb_btn, lv_pct(100), 52);
-    style_action_button(usb_btn, lv_color_make(0x12, 0x28, 0x38), lv_color_make(0x1A, 0x38, 0x4C));
-    lv_obj_add_event_cb(usb_btn, usb_btn_event_cb, LV_EVENT_CLICKED, NULL);
-    s_usb_btn_label = lv_label_create(usb_btn);
-    lv_obj_center(s_usb_btn_label);
-    lv_obj_set_style_text_font(s_usb_btn_label, &font_kartbox_lg, 0);
-    lv_label_set_text(s_usb_btn_label, "Modo pen drive (USB)");
-
-    lv_obj_t *del_btn = lv_button_create(col_sys);
-    lv_obj_set_size(del_btn, lv_pct(100), 52);
-    style_action_button(del_btn, COLOR_RED_DIM, lv_color_lighten(COLOR_RED_DIM, 50));
-    lv_obj_add_event_cb(del_btn, delete_btn_event_cb, LV_EVENT_CLICKED, NULL);
-    s_delete_btn_label = lv_label_create(del_btn);
-    lv_obj_center(s_delete_btn_label);
-    lv_obj_set_style_text_font(s_delete_btn_label, &font_kartbox_lg, 0);
-    lv_obj_set_style_text_color(s_delete_btn_label, COLOR_RED, 0);
-    lv_label_set_text(s_delete_btn_label, "Apagar tudo (SD)");
-
-    /* Brilho do display - ao vivo + NVS */
-    make_stepper_row(col_sys, "BRILHO DA TELA", bright_minus_cb, bright_plus_cb, &s_bright_value_label);
-    update_bright_label();
-
-    /* Protetor de tela - economia de bateria. Switch + tempos pra escurecer
-     * e apagar (o kart andando ou sessao gravando sempre mantem aceso). */
-    lv_obj_t *scr_row = bare(col_sys);
-    lv_obj_set_size(scr_row, lv_pct(100), 46);
-    lv_obj_set_style_pad_right(scr_row, 14, 0);
-    lv_obj_set_flex_flow(scr_row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(scr_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-
-    lv_obj_t *scr_lbl = lv_label_create(scr_row);
-    lv_obj_set_style_text_font(scr_lbl, &font_kartbox_lg, 0);
-    lv_obj_set_style_text_color(scr_lbl, COLOR_MUTED, 0);
-    lv_label_set_text(scr_lbl, "PROTETOR DE TELA");
-
-    lv_obj_t *scr_sw = lv_switch_create(scr_row);
-    lv_obj_set_style_bg_color(scr_sw, COLOR_PRIMARY_DIM, LV_PART_INDICATOR | LV_STATE_CHECKED);
-    if (settings_get_screensaver_enabled()) lv_obj_add_state(scr_sw, LV_STATE_CHECKED);
-    lv_obj_add_event_cb(scr_sw, scr_enabled_switch_cb, LV_EVENT_VALUE_CHANGED, NULL);
-
-    make_stepper_row(col_sys, "ESCURECER APOS", scr_dim_minus_cb, scr_dim_plus_cb, &s_scr_dim_value_label);
-    make_stepper_row(col_sys, "APAGAR APOS",    scr_off_minus_cb, scr_off_plus_cb, &s_scr_off_value_label);
-    update_scr_dim_label();
-    update_scr_off_label();
-
-    /* Backup/restore das configuracoes no SD - util antes de OTA grande,
-     * troca de placa ou reset. Arquivo texto legivel na raiz do cartao. */
-    lv_obj_t *cfg_bkp_row = bare(col_sys);
-    lv_obj_set_size(cfg_bkp_row, lv_pct(100), 52);
-    lv_obj_set_flex_flow(cfg_bkp_row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(cfg_bkp_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(cfg_bkp_row, 10, 0);
-
-    lv_obj_t *bkp_btn = lv_button_create(cfg_bkp_row);
-    lv_obj_set_size(bkp_btn, lv_pct(48), 52);
-    style_action_button(bkp_btn, COLOR_PRIMARY_DIM, COLOR_PRIMARY_ACCENT);
-    lv_obj_add_event_cb(bkp_btn, cfg_backup_btn_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *bkp_lbl = lv_label_create(bkp_btn);
-    lv_obj_center(bkp_lbl);
-    lv_obj_set_style_text_font(bkp_lbl, &font_kartbox_lg, 0);
-    lv_obj_set_style_text_color(bkp_lbl, COLOR_PRIMARY, 0);
-    lv_label_set_text(bkp_lbl, "Salvar config no SD");
-
-    lv_obj_t *rst_btn = lv_button_create(cfg_bkp_row);
-    lv_obj_set_size(rst_btn, lv_pct(48), 52);
-    style_action_button(rst_btn, lv_color_make(0x12, 0x28, 0x38), lv_color_make(0x1A, 0x38, 0x4C));
-    lv_obj_add_event_cb(rst_btn, cfg_restore_btn_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *rst_lbl = lv_label_create(rst_btn);
-    lv_obj_center(rst_lbl);
-    lv_obj_set_style_text_font(rst_lbl, &font_kartbox_lg, 0);
-    lv_obj_set_style_text_color(rst_lbl, COLOR_BLUE, 0);
-    lv_label_set_text(rst_lbl, "Restaurar do SD");
-
     /* Versao do firmware - com OTA em uso, "que versao esta rodando?"
      * precisa ter resposta na propria tela (a pagina do export tambem
      * mostra, mas exige ligar o WiFi). Vem do esp_app_desc (hash do git
@@ -2309,6 +2198,56 @@ static void build_config_tab(lv_obj_t *parent)
                           esp_app_get_description()->version,
                           esp_app_get_description()->date);
 
+
+    /* ---- TELA: brilho, tema, protetor de tela ---- */
+    lv_obj_t *col_tela = make_cfg_page(pages, 1, true);
+
+    make_preset_row(col_tela, "BRILHO DA TELA", "Aplica na hora. Minimo 20% pra tela nunca ficar ilegivel.", &p_bright);
+
+    /* Tema de cor da UI - dropdown com as paletas de THEME_PALETTES.
+     * Ordem das opcoes DEVE casar com os indices da tabela (e com o
+     * comentario em settings.h). Sem opcao vermelha de proposito. */
+    lv_obj_t *theme_row = bare(col_tela);
+    lv_obj_set_size(theme_row, lv_pct(100), 48);
+    lv_obj_set_flex_flow(theme_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(theme_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    lv_obj_t *theme_lbl = lv_label_create(theme_row);
+    lv_obj_set_style_text_font(theme_lbl, &font_kartbox_lg, 0);
+    lv_obj_set_style_text_color(theme_lbl, COLOR_MUTED, 0);
+    lv_label_set_text(theme_lbl, "TEMA (cor da UI)");
+
+    lv_obj_t *theme_dd = lv_dropdown_create(theme_row);
+    lv_obj_set_size(theme_dd, 220, 44);
+    lv_obj_set_style_text_font(theme_dd, &font_kartbox_lg, 0);
+    lv_dropdown_set_options(theme_dd, "Verde\nAzul\nAmbar\nLaranja\nRoxo");
+    lv_dropdown_set_selected(theme_dd, settings_get_theme());
+    lv_obj_add_event_cb(theme_dd, theme_dd_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    make_hint(col_tela, "Cor de destaque da interface. Vale depois de reiniciar.");
+
+    /* Protetor de tela - economia de bateria. Switch + tempos pra escurecer
+     * e apagar (o kart andando ou sessao gravando sempre mantem aceso). */
+    lv_obj_t *scr_row = bare(col_tela);
+    lv_obj_set_size(scr_row, lv_pct(100), 46);
+    lv_obj_set_style_pad_right(scr_row, 14, 0);
+    lv_obj_set_flex_flow(scr_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(scr_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    lv_obj_t *scr_lbl = lv_label_create(scr_row);
+    lv_obj_set_style_text_font(scr_lbl, &font_kartbox_lg, 0);
+    lv_obj_set_style_text_color(scr_lbl, COLOR_MUTED, 0);
+    lv_label_set_text(scr_lbl, "PROTETOR DE TELA");
+
+    lv_obj_t *scr_sw = lv_switch_create(scr_row);
+    lv_obj_set_style_bg_color(scr_sw, COLOR_PRIMARY_DIM, LV_PART_INDICATOR | LV_STATE_CHECKED);
+    if (settings_get_screensaver_enabled()) lv_obj_add_state(scr_sw, LV_STATE_CHECKED);
+    lv_obj_add_event_cb(scr_sw, scr_enabled_switch_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    make_hint(col_tela, "Economiza bateria. Com sessao gravando a tela fica sempre acesa.");
+    make_preset_row(col_tela, "ESCURECER APOS", "Tempo sem toque ate a tela escurecer.", &p_scr_dim);
+    make_preset_row(col_tela, "APAGAR APOS", "Depois desse tempo a tela apaga. \"nunca\" = so escurece.", &p_scr_off);
+
     /* ------------------------------------------------------------------
      * CORRIDA - fuso horario, raio do gate, tempo minimo de volta.
      * ------------------------------------------------------------------ */
@@ -2320,16 +2259,12 @@ static void build_config_tab(lv_obj_t *parent)
     lv_obj_add_flag(col_race, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scroll_dir(col_race, LV_DIR_VER);
     lv_obj_add_flag(col_race, LV_OBJ_FLAG_HIDDEN);
-    s_cfgsub_content[1] = col_race;
+    s_cfgsub_content[2] = col_race;
 
-    make_stepper_row(col_race, "FUSO HORARIO", utc_minus_cb, utc_plus_cb, &s_utc_value_label);
-    make_stepper_row(col_race, "RAIO DO GATE", gate_minus_cb, gate_plus_cb, &s_gate_value_label);
-    make_stepper_row(col_race, "MIN VOLTA",    min_lap_minus_cb, min_lap_plus_cb, &s_min_lap_value_label);
-    make_stepper_row(col_race, "ESCALA LED (delta)", led_scale_minus_cb, led_scale_plus_cb, &s_led_scale_value_label);
-    update_utc_label();
-    update_gate_label();
-    update_min_lap_label();
-    update_led_scale_label();
+    make_preset_row(col_race, "FUSO HORARIO", "Hora local dos arquivos. Brasilia = UTC-3:00.", &p_utc);
+    make_preset_row(col_race, "RAIO DO GATE", "Quao longe do ponto marcado ainda conta a volta.", &p_gate);
+    make_preset_row(col_race, "MIN VOLTA", "Volta mais curta que isso e ignorada (evita contar 2x).", &p_minlap);
+    make_preset_row(col_race, "ESCALA LED", "Delta que acende a barra de LED inteira. Menor = mais sensivel.", &p_ledscale);
 
     /* Auto-sessao - inicia sozinho quando o kart anda (pista carregada),
      * encerra sozinho depois de muito tempo parado. Ver AUTO_SESSION_*
@@ -2349,6 +2284,7 @@ static void build_config_tab(lv_obj_t *parent)
     lv_obj_set_style_bg_color(auto_sw, COLOR_PRIMARY_DIM, LV_PART_INDICATOR | LV_STATE_CHECKED);
     if (settings_get_auto_session()) lv_obj_add_state(auto_sw, LV_STATE_CHECKED);
     lv_obj_add_event_cb(auto_sw, auto_session_switch_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    make_hint(col_race, "Comeca ao andar e encerra depois de um tempo parado.");
 
     lv_obj_t *restore_btn = lv_button_create(col_race);
     lv_obj_set_size(restore_btn, lv_pct(100), 42);
@@ -2360,6 +2296,8 @@ static void build_config_tab(lv_obj_t *parent)
     lv_obj_set_style_text_color(restore_lbl, COLOR_GOLD, 0);
     lv_label_set_text(restore_lbl, "Restaurar padroes (fuso/gate/min volta)");
 
+
+    /* ---- REDES: WiFi e, no fim, Bluetooth (BLE) ---- */
     /* ------------------------------------------------------------------
      * WIFI - Modo AP proprio (rede isolada "KartBox-XXXX", sempre
      * funciona) vs Cliente/STA (conecta na rede do usuario -
@@ -2382,7 +2320,7 @@ static void build_config_tab(lv_obj_t *parent)
     lv_obj_add_flag(col_wifi, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scroll_dir(col_wifi, LV_DIR_VER);
     lv_obj_add_flag(col_wifi, LV_OBJ_FLAG_HIDDEN);
-    s_cfgsub_content[2] = col_wifi;
+    s_cfgsub_content[3] = col_wifi;
 
     lv_obj_t *wifi_mode_row = bare(col_wifi);
     lv_obj_set_size(wifi_mode_row, lv_pct(100), 44);
@@ -2518,18 +2456,12 @@ static void build_config_tab(lv_obj_t *parent)
      * (watchdog IDLE0, MEPC preso dentro de lv_label_set_text). */
     apply_wifi_mode_ui((wifi_export_mode_t)settings_get_wifi_mode());
 
-    /* ------------------------------------------------------------------
-     * BLE - telemetria ao vivo (on/off) + nome do dispositivo.
-     * ------------------------------------------------------------------ */
-    lv_obj_t *col_ble = bare(pages);
-    lv_obj_set_size(col_ble, lv_pct(100), lv_pct(100));
-    lv_obj_set_style_pad_all(col_ble, 14, 0);
+
+    make_cfg_divider(col_wifi, "BLUETOOTH (BLE)", COLOR_MUTED);
+    lv_obj_t *col_ble = bare(col_wifi);
+    lv_obj_set_size(col_ble, lv_pct(100), LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(col_ble, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(col_ble, 10, 0);
-    lv_obj_add_flag(col_ble, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_scroll_dir(col_ble, LV_DIR_VER);
-    lv_obj_add_flag(col_ble, LV_OBJ_FLAG_HIDDEN);
-    s_cfgsub_content[3] = col_ble;
 
     lv_obj_t *ble_row = bare(col_ble);
     lv_obj_set_size(ble_row, lv_pct(100), 44);
@@ -2562,10 +2494,65 @@ static void build_config_tab(lv_obj_t *parent)
     lv_obj_set_style_text_color(ble_note, COLOR_MUTED, 0);
     lv_label_set_text(ble_note, "o nome novo aparece no proximo anuncio (reconecte o celular)");
 
-    /* Comeca na sub-aba SISTEMA - mesma escolha da tab bar principal
-     * (mostra o mais "informativo pra checar rapido" primeiro). Tambem
-     * corrige a cor do label da sub-aba ativa (make_tab_btn deixa todos
-     * COLOR_MUTED por padrao). */
+
+    /* ---- DADOS: backup/restaurar, pen drive, apagar tudo (isolado no fim) ---- */
+    lv_obj_t *col_dados = make_cfg_page(pages, 4, true);
+
+    /* Backup/restore das configuracoes no SD - util antes de OTA grande,
+     * troca de placa ou reset. Arquivo texto legivel na raiz do cartao. */
+    lv_obj_t *cfg_bkp_row = bare(col_dados);
+    lv_obj_set_size(cfg_bkp_row, lv_pct(100), 52);
+    lv_obj_set_flex_flow(cfg_bkp_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(cfg_bkp_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(cfg_bkp_row, 10, 0);
+
+    lv_obj_t *bkp_btn = lv_button_create(cfg_bkp_row);
+    lv_obj_set_size(bkp_btn, lv_pct(48), 52);
+    style_action_button(bkp_btn, COLOR_PRIMARY_DIM, COLOR_PRIMARY_ACCENT);
+    lv_obj_add_event_cb(bkp_btn, cfg_backup_btn_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *bkp_lbl = lv_label_create(bkp_btn);
+    lv_obj_center(bkp_lbl);
+    lv_obj_set_style_text_font(bkp_lbl, &font_kartbox_lg, 0);
+    lv_obj_set_style_text_color(bkp_lbl, COLOR_PRIMARY, 0);
+    lv_label_set_text(bkp_lbl, "Salvar config no SD");
+
+    lv_obj_t *rst_btn = lv_button_create(cfg_bkp_row);
+    lv_obj_set_size(rst_btn, lv_pct(48), 52);
+    style_action_button(rst_btn, lv_color_make(0x12, 0x28, 0x38), lv_color_make(0x1A, 0x38, 0x4C));
+    lv_obj_add_event_cb(rst_btn, cfg_restore_btn_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *rst_lbl = lv_label_create(rst_btn);
+    lv_obj_center(rst_lbl);
+    lv_obj_set_style_text_font(rst_lbl, &font_kartbox_lg, 0);
+    lv_obj_set_style_text_color(rst_lbl, COLOR_BLUE, 0);
+    lv_label_set_text(rst_lbl, "Restaurar do SD");
+
+    make_hint(col_dados, "Guarda e recupera suas configuracoes num arquivo de texto no cartao SD.");
+
+    lv_obj_t *usb_btn = lv_button_create(col_dados);
+    lv_obj_set_size(usb_btn, lv_pct(100), 52);
+    style_action_button(usb_btn, lv_color_make(0x12, 0x28, 0x38), lv_color_make(0x1A, 0x38, 0x4C));
+    lv_obj_add_event_cb(usb_btn, usb_btn_event_cb, LV_EVENT_CLICKED, NULL);
+    s_usb_btn_label = lv_label_create(usb_btn);
+    lv_obj_center(s_usb_btn_label);
+    lv_obj_set_style_text_font(s_usb_btn_label, &font_kartbox_lg, 0);
+    lv_label_set_text(s_usb_btn_label, "Modo pen drive (USB)");
+
+    make_hint(col_dados, "Mostra o cartao SD como pen drive no computador.");
+
+    make_cfg_divider(col_dados, "ZONA DE PERIGO", COLOR_RED);
+    lv_obj_t *del_btn = lv_button_create(col_dados);
+    lv_obj_set_size(del_btn, lv_pct(100), 52);
+    style_action_button(del_btn, COLOR_RED_DIM, lv_color_lighten(COLOR_RED_DIM, 50));
+    lv_obj_add_event_cb(del_btn, delete_btn_event_cb, LV_EVENT_CLICKED, NULL);
+    s_delete_btn_label = lv_label_create(del_btn);
+    lv_obj_center(s_delete_btn_label);
+    lv_obj_set_style_text_font(s_delete_btn_label, &font_kartbox_lg, 0);
+    lv_obj_set_style_text_color(s_delete_btn_label, COLOR_RED, 0);
+    lv_label_set_text(s_delete_btn_label, "Apagar tudo (SD)");
+
+    make_hint(col_dados, "Apaga TODAS as sessoes do cartao. Pede dois toques pra confirmar.");
+
+    /* Comeca na sub-aba SISTEMA; corrige a cor do label ativo. */
     show_config_subtab(0);
 }
 
@@ -2794,7 +2781,7 @@ static void label_set_if_changed(lv_obj_t *l, const char *txt)
     lv_label_set_text(l, txt);
 }
 
-static void label_set_fmt_if_changed(lv_obj_t *l, const char *fmt, ...) __attribute__((format(printf, 3, 4)));
+static void label_set_fmt_if_changed(lv_obj_t *l, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
 static void label_set_fmt_if_changed(lv_obj_t *l, const char *fmt, ...)
 {
     char buf[200];
@@ -2988,15 +2975,17 @@ static void refresh_timer_cb(lv_timer_t *t)
 
         switch (gps_get_link_status()) {
         case GPS_LINK_ERROR:
-            lv_label_set_text(s_gps_link_label, "SEM COMUNICACAO - cheque modulo/fiacao");
+            lv_label_set_text(s_gps_link_label, "SEM COMUNICACAO - testando pinos/fiacao");
             lv_obj_set_style_text_color(s_gps_link_label, COLOR_RED, 0);
             break;
         case GPS_LINK_SEARCHING:
-            lv_label_set_text_fmt(s_gps_link_label, "buscando sinal (%u sats)", (unsigned)s.satellites);
+            lv_label_set_text_fmt(s_gps_link_label, "buscando sinal (%u sats)%s", (unsigned)s.satellites,
+                                  gps_pins_swapped() ? " [pinos inv.]" : "");
             lv_obj_set_style_text_color(s_gps_link_label, COLOR_GOLD, 0);
             break;
         case GPS_LINK_FIXED:
-            lv_label_set_text_fmt(s_gps_link_label, "OK - fix (%u sats)", (unsigned)s.satellites);
+            lv_label_set_text_fmt(s_gps_link_label, "OK - fix (%u sats)%s", (unsigned)s.satellites,
+                                  gps_pins_swapped() ? " [pinos inv.]" : "");
             lv_obj_set_style_text_color(s_gps_link_label, COLOR_GREEN, 0);
             break;
         }
@@ -4084,7 +4073,9 @@ void ui_refresh_session_list(void)
     size_t used = 0;
     opts[0] = '\0';
     for (int i = 0; i < count; i++) {
-        int n = snprintf(opts + used, opts_cap - used, "%s%s", i > 0 ? "\n" : "", sessions[i].filename);
+        char label[SD_SESSION_NAME_LEN + 8];
+        kb_session_label(sessions[i].filename, label, sizeof(label));
+        int n = snprintf(opts + used, opts_cap - used, "%s%s", i > 0 ? "\n" : "", label);
         if (n < 0 || (size_t)n >= opts_cap - used) break;
         used += (size_t)n;
     }

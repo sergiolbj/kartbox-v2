@@ -4,6 +4,7 @@
 #include "gps.h"
 #include "config.h"
 #include "app_events.h"
+#include "kb_pure.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -14,6 +15,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
+#include "nvs.h"
 
 static const char *TAG = "gps";
 
@@ -184,6 +186,8 @@ static bool      s_has_datetime = false;
  * valida) - usado so pra saber se o modulo esta fisicamente respondendo.
  * Ver gps_get_link_status(). */
 static volatile int64_t s_last_uart_rx_ms = 0;
+/* Visto pelo menos 1 NMEA com checksum valido desde o ultimo probe de pinos (auto-deteccao). */
+static volatile bool s_valid_seen = false;
 
 /* ----------------------------------------------------------------------
  * Log de diagnostico do link serial - resumo a cada 2s no monitor serial
@@ -241,44 +245,24 @@ static inline uint8_t hex_nibble(char c)
  * virar lat/lon furada la na frente. */
 static bool nmea_checksum_ok(const char *line, size_t len)
 {
-    if (len < 4 || line[0] != '$') return false;
-    const char *star = memchr(line, '*', len);
-    if (!star || (size_t)(star - line) + 3 > len) return false;
-
-    uint8_t calc = 0;
-    for (const char *p = line + 1; p < star; p++) calc ^= (uint8_t)*p;
-
-    uint8_t hi = hex_nibble(star[1]);
-    uint8_t lo = hex_nibble(star[2]);
-    if (hi == 0xFF || lo == 0xFF) return false;
-    return calc == ((hi << 4) | lo);
+    return kb_nmea_checksum_ok(line, len);
 }
 
 /* ddmm.mmmm (lat) ou dddmm.mmmm (lon) -> graus decimais. Funciona pros
  * dois formatos porque so olha "ultimos 2 digitos antes da fracao = minutos". */
 static double nmea_coord_to_decimal(double raw, char hemi)
 {
-    double minutes = fmod(raw, 100.0);
-    double degrees = (raw - minutes) / 100.0;
-    double dec = degrees + minutes / 60.0;
-    if (hemi == 'S' || hemi == 'W') dec = -dec;
-    return dec;
+    return kb_nmea_coord_to_decimal(raw, hemi);
 }
 
 static float distance_m(double lat1, double lon1, double lat2, double lon2)
 {
-    const double R = 6371000.0;
-    double dlat = (lat2 - lat1) * M_PI / 180.0;
-    double dlon = (lon2 - lon1) * M_PI / 180.0;
-    double mean_lat = (lat1 + lat2) * 0.5 * M_PI / 180.0;
-    double x = dlon * cos(mean_lat);
-    return (float)(sqrt(x * x + dlat * dlat) * R);
+    return kb_distance_m(lat1, lon1, lat2, lon2);
 }
 
 static float heading_diff(float a, float b)
 {
-    float d = fmodf(fabsf(a - b), 360.0f);
-    return (d > 180.0f) ? (360.0f - d) : d;
+    return kb_heading_diff(a, b);
 }
 
 /* Divide a sentenca em campos por ',' PRESERVANDO campos vazios (troca
@@ -290,16 +274,7 @@ static float heading_diff(float a, float b)
  * comentario de parse_rmc). */
 static int nmea_split(char *line, char *f[], int maxf)
 {
-    int n = 0;
-    char *p = line;
-    while (n < maxf) {
-        f[n++] = p;
-        char *c = strchr(p, ',');
-        if (!c) break;
-        *c = '\0';
-        p = c + 1;
-    }
-    return n;
+    return kb_nmea_split(line, f, maxf);
 }
 
 /* ----------------------------------------------------------------------
@@ -325,39 +300,16 @@ static int nmea_split(char *line, char *f[], int maxf)
  * resolucao temporal MELHOR que o proprio intervalo entre fixes.
  * ---------------------------------------------------------------------- */
 static bool    s_prev_valid = false;
+static kb_clock_sync_t s_clock_sync; /* so a task do GPS (parse_rmc) mexe */
 static double  s_prev_lat, s_prev_lon;
 static int64_t s_prev_us;
-
-/* lat/lon -> metros locais (leste/norte) relativos a um ponto de
- * referencia. Projecao equiretangular - precisao de sobra na escala de
- * uma pista de kart (poucas centenas de metros no maximo). */
-static void local_en_m(double lat, double lon, double ref_lat, double ref_lon,
-                        float *east, float *north)
-{
-    const double R = 6371000.0;
-    double mean_lat = (lat + ref_lat) * 0.5 * M_PI / 180.0;
-    *north = (float)((lat - ref_lat) * M_PI / 180.0 * R);
-    *east  = (float)((lon - ref_lon) * M_PI / 180.0 * R * cos(mean_lat));
-}
-
-/* Distancia assinalada ao longo da direcao de viagem do gate
- * (heading_deg), relativa ao ponto do gate. Negativo = antes da linha,
- * positivo (ou zero) = na linha ou depois dela. */
-static float signed_gate_dist(double lat, double lon, double gate_lat, double gate_lon,
-                               float heading_deg)
-{
-    float east, north;
-    local_en_m(lat, lon, gate_lat, gate_lon, &east, &north);
-    float rad = heading_deg * ((float)M_PI / 180.0f);
-    /* heading 0=Norte(+north), 90=Leste(+east) - projecao no vetor
-     * unitario da direcao de viagem */
-    return east * sinf(rad) + north * cosf(rad);
-}
 
 /* Checa se a transicao amostra-anterior -> amostra-atual cruzou o gate
  * pra frente, perto o suficiente dele e na direcao certa. Retorna o
  * instante interpolado do cruzamento via *out_us (so valido se
- * retornar true). */
+ * retornar true). A geometria (linha perpendicular, interpolacao, filtro de
+ * raio no ponto de cruzamento) vive em kb_pure.h e e' testada no PC
+ * (tests/test_pure.c). */
 static bool check_gate_cross(double gate_lat, double gate_lon, float gate_heading,
                               int64_t cur_us, int64_t *out_us)
 {
@@ -365,32 +317,9 @@ static bool check_gate_cross(double gate_lat, double gate_lon, float gate_headin
     /* lacuna >1.5s (perda de fix/atraso) -> a "reta" prev->cur nao representa o trajeto: evita falso cruzamento */
     if (cur_us - s_prev_us > 1500000) return false;
 
-    float d_prev = signed_gate_dist(s_prev_lat, s_prev_lon, gate_lat, gate_lon, gate_heading);
-    float d_cur  = signed_gate_dist(s_state.lat, s_state.lon, gate_lat, gate_lon, gate_heading);
-
-    /* cruzamento pra frente: estava antes da linha, agora esta na linha
-     * ou depois dela */
-    if (!(d_prev < 0.0f && d_cur >= 0.0f)) return false;
-
-    /* interpolacao linear do instante/posicao exatos do cruzamento entre
-     * as duas amostras, baseado em quao perto de zero cada lado estava */
-    float span = d_cur - d_prev;
-    float frac = (span > 0.0001f) ? (-d_prev / span) : 0.0f;
-    if (frac < 0.0f) frac = 0.0f;
-    if (frac > 1.0f) frac = 1.0f;
-
-    /* Filtro de proximidade no PONTO DE CRUZAMENTO interpolado, nao nas
-     * amostras cruas (correcao de campo: raio < 15m nao contava volta).
-     * Nas amostras, a distancia ao gate carrega a componente LONGITUDINAL
-     * (a 100km/h/10Hz cada amostra fica ate ~3m antes/depois da linha),
-     * que se soma ao afastamento lateral real e obriga raio inflado. No
-     * ponto interpolado a longitudinal e' ~zero por definicao - o que
-     * sobra e' o afastamento LATERAL verdadeiro, entao o raio vira
-     * literalmente "meia-largura da linha de chegada" (largura da pista
-     * + erro de GPS), da pra apertar sem perder cruzamento. */
-    double cross_lat = s_prev_lat + (s_state.lat - s_prev_lat) * (double)frac;
-    double cross_lon = s_prev_lon + (s_state.lon - s_prev_lon) * (double)frac;
-    if (distance_m(cross_lat, cross_lon, gate_lat, gate_lon) > s_gate_radius_m) return false;
+    float frac;
+    if (!kb_gate_cross_frac(s_prev_lat, s_prev_lon, s_state.lat, s_state.lon,
+                            gate_lat, gate_lon, gate_heading, s_gate_radius_m, &frac)) return false;
 
     /* direcao de viagem tem que bater com a direcao registrada no gate */
     if (heading_diff(s_state.heading_deg, gate_heading) > GATE_MAX_HEADING_DIFF) return false;
@@ -404,12 +333,7 @@ static bool check_gate_cross(double gate_lat, double gate_lon, float gate_headin
  * variam de disponibilidade entre toolchains embarcadas. */
 static int64_t days_from_civil(int y, int m, int d)
 {
-    y -= (m <= 2);
-    int64_t era = (y >= 0 ? y : y - 399) / 400;
-    int yoe = (int)(y - era * 400);
-    int doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
-    int doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    return era * 146097 + doe - 719468;
+    return kb_days_from_civil(y, m, d);
 }
 
 static time_t my_timegm(const struct tm *tm)
@@ -735,6 +659,18 @@ static void parse_rmc(char *line)
     utc_tm.tm_year = 100 + (f_date[4] - '0') * 10 + (f_date[5] - '0');
 
     int64_t now_us = esp_timer_get_time();
+    /* Carimbo pela hora de MEDICAO do GPS (hhmmss.ss do RMC), convertida pra
+     * base do esp_timer: tira o jitter de chegada da linha NMEA (UART, task,
+     * momento em que o modulo emite) que virava erro direto no tempo de
+     * volta. Sem casas decimais na hora (modulo a 1 Hz sem .ss) ou hora
+     * invalida: cai no carimbo de chegada, como antes. Ver kb_pure.h. */
+    {
+        int64_t gps_us;
+        bool    has_frac = false;
+        if (kb_utc_to_us(f_time, f_date, &gps_us, &has_frac) && has_frac) {
+            now_us = kb_clock_sync(&s_clock_sync, now_us, gps_us);
+        }
+    }
 
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     s_state.fix_valid    = true;
@@ -862,6 +798,7 @@ static void gps_handle_line(char *line, size_t len)
         return;
     }
     s_dbg_lines_ok++;
+    s_valid_seen = true;
 
     char *star = strchr(line, '*');
     if (star) *star = '\0';
@@ -878,6 +815,55 @@ static void gps_handle_line(char *line, size_t len)
 /* ----------------------------------------------------------------------
  * UART + task
  * ---------------------------------------------------------------------- */
+/* ----------------------------------------------------------------------
+ * Auto-deteccao da pinagem TX/RX do modulo GPS
+ *
+ * Se o fio do GPS foi ligado invertido (TX<->RX), nenhuma sentenca NMEA
+ * chega. Ate ver a PRIMEIRA sentenca NMEA com checksum valido, a task
+ * alterna a pinagem a cada GPS_PIN_PROBE_MS. Ao achar, trava e grava em NVS
+ * ("kb_gps"/"pins_inv") - o proximo boot ja comeca na pinagem certa.
+ * Independe de ceu aberto: o modulo manda NMEA (campos vazios) sem fix.
+ * ---------------------------------------------------------------------- */
+#define GPS_PIN_PROBE_MS (3000)
+static bool          s_pins_swapped    = false;  /* pinagem atual (false = config.h) */
+static bool          s_pins_saved      = false;  /* valor gravado em NVS */
+static bool          s_pins_locked     = false;  /* ja viu NMEA valido neste boot */
+static int64_t       s_probe_start_ms  = 0;
+static int64_t       s_lock_ms         = 0;
+
+static void gps_pins_load(void)
+{
+    nvs_handle_t h;
+    uint8_t v = 0;
+    if (nvs_open("kb_gps", NVS_READONLY, &h) == ESP_OK) {
+        if (nvs_get_u8(h, "pins_inv", &v) != ESP_OK) v = 0;
+        nvs_close(h);
+    }
+    s_pins_swapped = (v == 1);
+    s_pins_saved   = s_pins_swapped;
+}
+
+static void gps_pins_save(bool swapped)
+{
+    nvs_handle_t h;
+    if (nvs_open("kb_gps", NVS_READWRITE, &h) != ESP_OK) return;
+    if (nvs_set_u8(h, "pins_inv", swapped ? 1 : 0) == ESP_OK) nvs_commit(h);
+    nvs_close(h);
+    s_pins_saved = swapped;
+}
+
+static void gps_pins_apply(bool swapped)
+{
+    int tx = swapped ? GPS_RX_PIN : GPS_TX_PIN;
+    int rx = swapped ? GPS_TX_PIN : GPS_RX_PIN;
+    ESP_ERROR_CHECK(uart_set_pin(GPS_UART_NUM, tx, rx, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+}
+
+bool gps_pins_swapped(void)
+{
+    return s_pins_swapped;
+}
+
 static void uart_init_gps(void)
 {
     const uart_config_t cfg = {
@@ -890,8 +876,7 @@ static void uart_init_gps(void)
     };
     ESP_ERROR_CHECK(uart_driver_install(GPS_UART_NUM, GPS_RX_BUF_SIZE, 0, 0, NULL, 0));
     ESP_ERROR_CHECK(uart_param_config(GPS_UART_NUM, &cfg));
-    ESP_ERROR_CHECK(uart_set_pin(GPS_UART_NUM, GPS_TX_PIN, GPS_RX_PIN,
-                                  UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+    gps_pins_apply(s_pins_swapped);
 }
 
 /* Liga GLONASS via UBX-CFG-VALSET, camada RAM (nao persiste no modulo -
@@ -909,34 +894,199 @@ static void uart_init_gps(void)
  * (sem jammer) - la ele volta ao default de fabrica ao ligar.
  * Keys: CFG-SIGNAL-GLO_ENA=0x10310025, CFG-SIGNAL-GLO_L1_ENA=0x10310018
  * (u-blox M10 interface description). */
-static void gps_send_enable_glonass(void)
+/* ---- Captura de respostas UBX (usada so pelo registro AssistNow/ZTP) ----
+ * O gps_task alimenta o parser com todo byte da UART; quando um frame UBX
+ * valido fecha e bate com a classe/id armados, copia o frame inteiro pro
+ * buffer abaixo e sinaliza. Nada disso mexe no caminho NMEA. */
+static kb_ubx_parser_t   s_ubx_par;
+static volatile uint8_t  s_cap_cls = 0, s_cap_id = 0;
+static volatile bool     s_cap_armed = false;
+static volatile bool     s_cap_ready = false;
+static uint8_t           s_cap_buf[KB_UBX_MAX];
+static volatile uint16_t s_cap_len = 0;
+
+static void gps_ubx_byte(uint8_t b)
 {
-    /* QZSS desligado JUNTO: o M10 processa no maximo 4 constelacoes
-     * simultaneas - GPS+GAL+BDS+QZSS ja ocupava tudo, e pedir GLONASS
-     * por cima fazia o modulo rejeitar (NAK) o VALSET INTEIRO (visto em
-     * campo: nenhum $GLGSV aparecia). QZSS e' regional do Japao, zero
-     * utilidade no Brasil - sai ele, entra GLONASS. */
-    uint8_t frame[] = {
-        0xB5, 0x62,                         /* sync UBX */
-        0x06, 0x8A,                         /* classe/ID: CFG-VALSET */
-        0x13, 0x00,                         /* payload len = 19 (LE) */
-        0x00,                               /* version 0 */
-        0x01,                               /* layers: so RAM */
-        0x00, 0x00,                         /* reservado */
-        0x24, 0x00, 0x31, 0x10, 0x00,       /* CFG-SIGNAL-QZSS_ENA   = 0 (libera a 4a vaga) */
-        0x25, 0x00, 0x31, 0x10, 0x01,       /* CFG-SIGNAL-GLO_ENA    = 1 (key U4 LE + val L) */
-        0x18, 0x00, 0x31, 0x10, 0x01,       /* CFG-SIGNAL-GLO_L1_ENA = 1 */
-        0x00, 0x00                          /* checksum Fletcher (preenchido abaixo) */
-    };
-    uint8_t ck_a = 0, ck_b = 0;
-    for (size_t i = 2; i < sizeof(frame) - 2; i++) {
-        ck_a = (uint8_t)(ck_a + frame[i]);
-        ck_b = (uint8_t)(ck_b + ck_a);
+    if (kb_ubx_feed(&s_ubx_par, b) && s_cap_armed &&
+        s_ubx_par.buf[2] == s_cap_cls && s_ubx_par.buf[3] == s_cap_id) {
+        memcpy(s_cap_buf, s_ubx_par.buf, s_ubx_par.n);
+        s_cap_len   = s_ubx_par.n;
+        s_cap_armed = false;
+        s_cap_ready = true;
     }
-    frame[sizeof(frame) - 2] = ck_a;
-    frame[sizeof(frame) - 1] = ck_b;
-    uart_write_bytes(GPS_UART_NUM, (const char *)frame, sizeof(frame));
-    ESP_LOGI(TAG, "GLONASS habilitado via UBX (RAM) - contorno pro jammer de 1575MHz da caixa");
+}
+
+/* Transacao UBX: envia (cls,id,payload) e espera o frame de resposta
+ * (rcls,rid); copia o frame inteiro pra out (outsz) e devolve o tamanho,
+ * ou 0 se estourou o tempo. Um de cada vez (s_xact_busy). NAO chamar de
+ * dentro do gps_task: ele mesmo alimenta o parser que recebe a resposta. */
+static volatile bool s_xact_busy = false;
+
+static size_t gps_ubx_xact(uint8_t cls, uint8_t id, const uint8_t *pl, uint16_t plen,
+                           uint8_t rcls, uint8_t rid, uint8_t *out, size_t outsz, uint32_t timeout_ms)
+{
+    int64_t t0 = esp_timer_get_time() / 1000;
+    while (s_xact_busy) {                       /* espera a transacao anterior */
+        if ((esp_timer_get_time() / 1000) - t0 > 3000) return 0;
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    s_xact_busy = true;
+
+    uint8_t f[64];
+    size_t fl = kb_ubx_build(f, sizeof f, cls, id, pl, plen);
+    size_t res = 0;
+    if (fl) {
+        s_cap_cls = rcls; s_cap_id = rid;
+        s_cap_ready = false;
+        s_cap_armed = true;
+        uart_write_bytes(GPS_UART_NUM, (const char *)f, fl);
+
+        t0 = esp_timer_get_time() / 1000;
+        while (!s_cap_ready && (esp_timer_get_time() / 1000) - t0 <= (int64_t)timeout_ms) {
+            vTaskDelay(pdMS_TO_TICKS(20));
+        }
+        s_cap_armed = false;
+        if (s_cap_ready && s_cap_len <= outsz) {
+            memcpy(out, s_cap_buf, s_cap_len);
+            res = s_cap_len;
+        }
+    }
+    s_xact_busy = false;
+    return res;
+}
+
+/* Poll sem payload -> resposta com mesma classe/id, devolvida em hex. */
+static bool gps_ubx_poll(uint8_t cls, uint8_t id, char *hex, size_t hexsz, uint32_t timeout_ms)
+{
+    uint8_t fr[KB_UBX_MAX];
+    size_t n = gps_ubx_xact(cls, id, NULL, 0, cls, id, fr, sizeof fr, timeout_ms);
+    return n > 0 && kb_hex_encode(fr, n, hex, hexsz) > 0;
+}
+
+bool gps_read_ztp_info(char *uniqid_hex, size_t uniqid_sz, char *monver_hex, size_t monver_sz)
+{
+    if (!uniqid_hex || !monver_hex) return false;
+    /* tenta 3x cada: o modulo pode estar ocupado despejando NMEA */
+    bool ok1 = false, ok2 = false;
+    for (int i = 0; i < 3 && !ok1; i++) ok1 = gps_ubx_poll(0x27, 0x03, uniqid_hex, uniqid_sz, 800);
+    for (int i = 0; i < 3 && !ok2; i++) ok2 = gps_ubx_poll(0x0A, 0x04, monver_hex, monver_sz, 800);
+    if (!ok1 || !ok2) {
+        ESP_LOGW(TAG, "ZTP: modulo nao respondeu ao poll UBX (uniqid=%d monver=%d)", ok1, ok2);
+        return false;
+    }
+    return true;
+}
+
+/* ---- Configuracao explicita das constelacoes -------------------------
+ * Chaves CFG-SIGNAL-*_ENA (L, 1 byte). Achado em campo (log de um modulo
+ * que nunca mostrava $GLGSV): o M10 REJEITA ligar GLONASS junto com
+ * BeiDou - o VALSET inteiro leva NAK e nada muda (antes == depois no log).
+ * Por isso tentamos perfis em ordem, confirmando por releitura:
+ *   A) GPS+GAL+GLO (+SBAS) - GLONASS (1602 MHz) fica fora da faixa de
+ *      1575 MHz onde a caixa tem interferencia (GPS L1/GAL E1/BDS B1C).
+ *   B) GPS+GAL+BDS (+SBAS) - se o modulo nao aceitar o A.
+ * QZSS sempre fora (regional do Japao). So camada RAM, de proposito: o mesmo
+ * modulo e' usado no drone do usuario (sem a interferencia da caixa) e la
+ * precisa voltar ao default de fabrica - entao a config e' reaplicada a
+ * cada boot do kartbox e nunca gravada na flash/BBR do modulo. */
+#define KEY_GPS_ENA   0x1031001Fu
+#define KEY_SBAS_ENA  0x10310020u
+#define KEY_GAL_ENA   0x10310021u
+#define KEY_BDS_ENA   0x10310022u
+#define KEY_QZSS_ENA  0x10310024u
+#define KEY_GLO_ENA   0x10310025u
+
+static const struct { uint32_t key; const char *name; } k_sig_cfg[] = {
+    { KEY_GPS_ENA, "GPS" }, { KEY_SBAS_ENA, "SBAS" }, { KEY_GAL_ENA, "GAL" },
+    { KEY_BDS_ENA, "BDS" }, { KEY_GLO_ENA, "GLO" },   { KEY_QZSS_ENA, "QZSS" },
+};
+#define K_SIG_N (sizeof(k_sig_cfg) / sizeof(k_sig_cfg[0]))
+/* ordem das colunas = k_sig_cfg: GPS SBAS GAL BDS GLO QZSS */
+static const uint8_t k_profiles[2][K_SIG_N] = {
+    { 1, 1, 1, 0, 1, 0 },   /* A: GPS+GAL+GLO */
+    { 1, 1, 1, 1, 0, 0 },   /* B: GPS+GAL+BDS */
+};
+static const char *const k_profile_names[2] = { "GPS+GAL+GLO", "GPS+GAL+BDS" };
+
+/* Le as 6 chaves da camada RAM. vals[i]: 0/1, ou 0xFF se nao veio. true = resposta chegou. */
+static bool gps_read_sig_cfg(uint8_t vals[K_SIG_N])
+{
+    uint8_t pl[4 + 4 * K_SIG_N];
+    pl[0] = 0; pl[1] = 0; pl[2] = 0; pl[3] = 0;          /* version 0, layer RAM, position 0 */
+    for (size_t i = 0; i < K_SIG_N; i++) {
+        uint32_t k = k_sig_cfg[i].key;
+        pl[4 + 4 * i] = (uint8_t)k; pl[5 + 4 * i] = (uint8_t)(k >> 8);
+        pl[6 + 4 * i] = (uint8_t)(k >> 16); pl[7 + 4 * i] = (uint8_t)(k >> 24);
+    }
+    uint8_t fr[KB_UBX_MAX];
+    size_t n = gps_ubx_xact(0x06, 0x8B, pl, sizeof pl, 0x06, 0x8B, fr, sizeof fr, 1000);
+    if (!n) return false;
+    for (size_t i = 0; i < K_SIG_N; i++) {
+        uint8_t v;
+        vals[i] = kb_ubx_valget_u8(fr, n, k_sig_cfg[i].key, &v) ? v : 0xFF;
+    }
+    return true;
+}
+
+static void gps_log_sig_cfg(const char *tag, const uint8_t vals[K_SIG_N])
+{
+    char line[96]; size_t o = 0;
+    for (size_t i = 0; i < K_SIG_N && o + 12 < sizeof line; i++) {
+        if (vals[i] == 0xFF) o += (size_t)snprintf(line + o, sizeof line - o, "%s=? ", k_sig_cfg[i].name);
+        else                 o += (size_t)snprintf(line + o, sizeof line - o, "%s=%u ", k_sig_cfg[i].name, vals[i]);
+    }
+    ESP_LOGI(TAG, "GNSS cfg %s: %s", tag, line);
+}
+
+/* VALSET das 6 chaves com os valores `want`, nas camadas pedidas (1=RAM 2=BBR 4=FLASH). */
+static void gps_valset_sig_cfg(uint8_t layers, const uint8_t want[K_SIG_N])
+{
+    uint8_t pl[4 + 5 * K_SIG_N];
+    pl[0] = 0; pl[1] = layers; pl[2] = 0; pl[3] = 0;
+    for (size_t i = 0; i < K_SIG_N; i++) {
+        uint32_t k = k_sig_cfg[i].key;
+        pl[4 + 5 * i] = (uint8_t)k; pl[5 + 5 * i] = (uint8_t)(k >> 8);
+        pl[6 + 5 * i] = (uint8_t)(k >> 16); pl[7 + 5 * i] = (uint8_t)(k >> 24);
+        pl[8 + 5 * i] = want[i];
+    }
+    uint8_t f[64];
+    size_t fl = kb_ubx_build(f, sizeof f, 0x06, 0x8A, pl, sizeof pl);
+    if (fl) uart_write_bytes(GPS_UART_NUM, (const char *)f, fl);
+}
+
+static bool sig_cfg_equal(const uint8_t a[K_SIG_N], const uint8_t b[K_SIG_N])
+{
+    for (size_t i = 0; i < K_SIG_N; i++) if (a[i] != b[i]) return false;
+    return true;
+}
+
+static void gps_cfg_task(void *arg)
+{
+    (void)arg;
+    uint8_t before[K_SIG_N], after[K_SIG_N];
+    bool have_before = gps_read_sig_cfg(before);
+    if (have_before) gps_log_sig_cfg("antes ", before);
+    else ESP_LOGW(TAG, "GNSS cfg: modulo nao respondeu ao VALGET (antes)");
+
+    int chosen = -1;
+    for (int p = 0; p < 2 && chosen < 0; p++) {
+        gps_valset_sig_cfg(0x01, k_profiles[p]);        /* RAM: vale ja */
+        vTaskDelay(pdMS_TO_TICKS(300));
+        if (!gps_read_sig_cfg(after)) {
+            ESP_LOGW(TAG, "GNSS cfg: modulo nao respondeu ao VALGET (depois, perfil %s)", k_profile_names[p]);
+            continue;
+        }
+        gps_log_sig_cfg("depois", after);
+        if (sig_cfg_equal(after, k_profiles[p])) chosen = p;
+        else ESP_LOGW(TAG, "GNSS cfg: modulo recusou o perfil %s - tentando o proximo", k_profile_names[p]);
+    }
+
+    if (chosen < 0) {
+        ESP_LOGW(TAG, "GNSS cfg: nenhum perfil aceito - mantida a config do modulo");
+    } else {
+        ESP_LOGI(TAG, "GNSS cfg: perfil %s ativo", k_profile_names[chosen]);
+    }
+    vTaskDelete(NULL);
 }
 
 static void gps_task(void *arg)
@@ -957,9 +1107,30 @@ static void gps_task(void *arg)
 
         /* 3s depois do boot o modulo com certeza ja esta de pe' pra
          * receber configuracao - liga GLONASS (uma vez por boot). */
-        if (!glo_cfg_sent && now_ms > 3000) {
+        /* Auto-deteccao de pinos: sem NMEA valido ainda -> alterna TX/RX. */
+        if (!s_pins_locked) {
+            if (s_valid_seen) {
+                s_pins_locked = true;
+                s_lock_ms = now_ms;
+                ESP_LOGI(TAG, "GPS: NMEA valido detectado, pinagem %s travada",
+                         s_pins_swapped ? "INVERTIDA" : "normal");
+                if (s_pins_saved != s_pins_swapped) gps_pins_save(s_pins_swapped);
+            } else if (now_ms - s_probe_start_ms >= GPS_PIN_PROBE_MS) {
+                s_pins_swapped = !s_pins_swapped;
+                gps_pins_apply(s_pins_swapped);
+                uart_flush_input(GPS_UART_NUM);
+                line_len = 0;
+                s_probe_start_ms = now_ms;
+                ESP_LOGW(TAG, "GPS: sem NMEA valido em %d ms - tentando pinagem %s",
+                         GPS_PIN_PROBE_MS, s_pins_swapped ? "INVERTIDA" : "normal");
+            }
+        }
+
+        /* Configura o modulo so DEPOIS de travar a pinagem (antes disso o TX
+         * poderia estar indo pro pino errado). */
+        if (!glo_cfg_sent && s_pins_locked && now_ms - s_lock_ms > 1000) {
             glo_cfg_sent = true;
-            gps_send_enable_glonass();
+            xTaskCreate(gps_cfg_task, "gps_cfg", 4096, NULL, 5, NULL);
         }
         if (now_ms - s_dbg_last_log_ms >= GPS_DEBUG_LOG_PERIOD_MS) {
             uint8_t sats = 0;
@@ -1002,6 +1173,7 @@ static void gps_task(void *arg)
 
         for (int i = 0; i < n; i++) {
             uint8_t b = chunk[i];
+            gps_ubx_byte(b);
             if (b == '\n' || b == '\r') {
                 if (line_len > 0) {
                     line[line_len] = '\0';
@@ -1043,9 +1215,12 @@ void gps_init(QueueHandle_t sd_log_queue)
         ESP_LOGW(TAG, "Falha ao alocar buffer de trace em PSRAM - delta ao vivo desativado");
     }
 
+    gps_pins_load();
+    s_probe_start_ms = esp_timer_get_time() / 1000;
     uart_init_gps();
     xTaskCreate(gps_task, "gps_task", 4096, NULL, 8, NULL);
-    ESP_LOGI(TAG, "GPS pronto (UART%d, %d baud)", GPS_UART_NUM, GPS_BAUD_RATE);
+    ESP_LOGI(TAG, "GPS pronto (UART%d, %d baud, pinagem %s)", GPS_UART_NUM, GPS_BAUD_RATE,
+             s_pins_swapped ? "INVERTIDA" : "normal");
 }
 
 void gps_set_log_queue(QueueHandle_t sd_log_queue)

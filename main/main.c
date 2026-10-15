@@ -83,9 +83,17 @@ static void save_coredump_to_sd(void)
         fclose(probe);
     }
 
-    FILE *f = fopen(path, "wb");
+    /* O SD divide o controlador SDMMC com o C6 (SDIO) e as vezes da'
+     * timeout (0x101) numa leitura/escrita avulsa - tenta algumas vezes
+     * antes de desistir (o coredump continua na flash se nao der). */
+    FILE *f = NULL;
+    for (int attempt = 0; attempt < 4 && !f; attempt++) {
+        f = fopen(path, "wb");
+        if (!f) vTaskDelay(pdMS_TO_TICKS(300));
+    }
     if (!f) {
-        ESP_LOGW(TAG, "Coredump pendente mas SD indisponivel - fica na flash pro proximo boot");
+        ESP_LOGW(TAG, "Coredump pendente mas SD indisponivel - fica na flash pro proximo boot "
+                      "(baixavel por WiFi em /api/coredump)");
         return;
     }
 
@@ -94,7 +102,7 @@ static void save_coredump_to_sd(void)
     while (off < size) {
         size_t chunk = (size - off) > sizeof(buf) ? sizeof(buf) : (size - off);
         if (esp_partition_read(part, off, buf, chunk) != ESP_OK) break;
-        fwrite(buf, 1, chunk, f);
+        if (fwrite(buf, 1, chunk, f) != chunk) break;
         off += chunk;
     }
     fclose(f);
@@ -603,8 +611,50 @@ static void handle_event(const app_event_t *evt)
     }
 }
 
+/* ----------------------------------------------------------------------
+ * Confirmacao atrasada do OTA (ver uso em app_main)
+ * ---------------------------------------------------------------------- */
+#define OTA_CONFIRM_DELAY_MS (15000)
+
+static void ota_confirm_cb(void *arg)
+{
+    (void)arg;
+    esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
+    if (err == ESP_OK) {
+        ESP_LOGI("main", "OTA: firmware confirmado (rodou %d s estavel)", OTA_CONFIRM_DELAY_MS / 1000);
+    } else {
+        ESP_LOGW("main", "OTA: falha ao confirmar firmware (%s)", esp_err_to_name(err));
+    }
+}
+
+static void start_ota_confirm_timer(void)
+{
+    esp_ota_img_states_t st;
+    const esp_partition_t *run = esp_ota_get_running_partition();
+    if (!run || esp_ota_get_state_partition(run, &st) != ESP_OK ||
+        st != ESP_OTA_IMG_PENDING_VERIFY) {
+        return; /* boot normal (cabo ou ja confirmado): nada pendente */
+    }
+    ESP_LOGW("main", "OTA: firmware NOVO em teste - confirma em %d s. Se reiniciar antes, volta pra versao anterior.",
+             OTA_CONFIRM_DELAY_MS / 1000);
+    const esp_timer_create_args_t args = {
+        .callback = ota_confirm_cb,
+        .name = "ota_confirm",
+    };
+    esp_timer_handle_t h = NULL;
+    if (esp_timer_create(&args, &h) == ESP_OK && h &&
+        esp_timer_start_once(h, (uint64_t)OTA_CONFIRM_DELAY_MS * 1000ULL) == ESP_OK) {
+        return;
+    }
+    /* sem timer: confirma na hora (melhor que ficar eternamente pendente e
+     * voltar de versao a cada reset) */
+    ESP_LOGE("main", "OTA: nao consegui criar o timer de confirmacao - confirmando agora");
+    esp_ota_mark_app_valid_cancel_rollback();
+}
+
 void app_main(void)
 {
+    wifi_export_log_start(); /* log tambem disponivel por WiFi (/log) */
     ESP_ERROR_CHECK(nvs_flash_init());
     settings_init();
 
@@ -746,12 +796,15 @@ void app_main(void)
 
     ESP_LOGI(TAG, "kartbox v2 pronto");
 
-    /* OTA rollback: chegar ate aqui = display + GPS + SD + BLE subiram,
-     * firmware novo e' funcional - confirma o boot pro bootloader nao
-     * voltar pra versao anterior no proximo reset. No-op se o rollback
-     * nao estiver habilitado no sdkconfig ou se o boot nao veio de um
-     * update pendente. */
-    esp_ota_mark_app_valid_cancel_rollback();
+    /* OTA rollback: firmware recem-gravado por OTA fica "em teste"
+     * (PENDING_VERIFY). So CONFIRMAMOS depois de OTA_CONFIRM_DELAY_MS rodando
+     * sem travar/reiniciar: se alguma task (GPS, BLE, WiFi, SD...) derrubar
+     * o sistema nesses segundos, o bootloader volta sozinho pra versao
+     * anterior. Antes confirmava no instante em que o boot terminava, o que
+     * deixava de pegar crash que so aparece logo depois (tasks subindo).
+     * ATENCAO: desligar a placa antes do prazo tambem conta como "nao
+     * confirmou" e volta pra versao anterior. */
+    start_ota_confirm_timer();
 
     app_event_t evt;
     for (;;) {

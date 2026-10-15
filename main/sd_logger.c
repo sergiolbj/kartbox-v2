@@ -26,6 +26,8 @@ static const char *TAG = "sd_logger";
 
 static QueueHandle_t    s_log_queue;
 static sdmmc_card_t    *s_card = NULL;
+
+#define SD_MAX_FREQ_KHZ (20000) /* = padrao do IDF; 10000 foi testado e nao ajudou */
 static FILE             *s_session_file = NULL;
 static SemaphoreHandle_t s_file_mtx = NULL; /* protege s_session_file entre task de log e start/stop */
 static volatile bool     s_recording = false;
@@ -114,6 +116,13 @@ static bool sd_power_and_mount(void)
      * real do crash "xQueueSemaphoreTake queue.c:1709" dentro do
      * hosted_sdio_card_init() ao ligar WiFi/BT (ver esp-hosted-mcu#124). */
     host.slot = SDMMC_HOST_SLOT_0;
+    /* Clock do SD: o padrao do IDF e' 20 MHz. Em campo aparece
+     * "sdmmc_read_blocks failed (0x101)" (timeout) nos dois kartbox,
+     * sempre perto de atividade do C6 pelo SDIO (que divide o
+     * controlador SDMMC) e com so' pull-up interno nas linhas. 10 MHz
+     * da' mais margem de tempo/sinal e custa nada: o volume de dado
+     * (CSV a 10 Hz + arquivos pequenos) e' minusculo. */
+    host.max_freq_khz = SD_MAX_FREQ_KHZ;
 
     sdmmc_slot_config_t slot_cfg = SDMMC_SLOT_CONFIG_DEFAULT();
     /* ATUALIZACAO: a suspeita original aqui (D1-D3 marginais causando

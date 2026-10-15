@@ -9,6 +9,7 @@
  */
 #include "track_manager.h"
 #include "config.h"
+#include "kb_pure.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -40,16 +41,7 @@ static int  s_count = 0;
  * separadores de caminho, "." / ".." e caracteres invalidos em FAT. */
 static bool name_valid(const char *name)
 {
-    if (!name) return false;
-    size_t n = strnlen(name, TRACK_NAME_MAX);
-    if (n == 0 || n >= TRACK_NAME_MAX) return false;
-    if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) return false;
-    for (size_t i = 0; i < n; i++) {
-        unsigned char c = (unsigned char)name[i];
-        if (c < 0x20 || strchr("/\\:*?\"<>|", c)) return false;
-    }
-    if (name[n - 1] == ' ' || name[n - 1] == '.') return false; /* FAT remove */
-    return true;
+    return kb_name_check(name, TRACK_NAME_MAX) == KB_NAME_OK; /* regras em kb_pure.h (testadas no PC) */
 }
 
 static void build_path(char *buf, size_t len, const char *name)

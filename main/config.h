@@ -135,3 +135,14 @@
 /* Nome mDNS fixo, sem ".local" - funciona tanto no AP proprio quanto
  * (modo STA) conectado na rede do usuario, sem precisar saber o IP. */
 #define WIFI_MDNS_HOSTNAME        "kartbox"
+
+/* A-GPS (u-blox AssistNow via Thingstream ZTP): token de registro do perfil
+ * de dispositivo "kartbox". Com ele o firmware registra o modulo GPS sozinho
+ * e guarda o chipcode no NVS. Nao e segredo forte (so permite registrar ate
+ * 3 dispositivos no plano Evaluation). */
+#define AGPS_ZTP_TOKEN_DEFAULT "a7fbc008-b5a8-44e9-998c-333566426d49"
+
+/* Log do sistema pela pagina /log do WiFi (engancha o ESP_LOG num anel de
+ * 32KB). DESLIGADO por padrao enquanto se investiga o SD que deixou de ler
+ * as sessoes: 1 = liga, 0 = desliga (a pagina /log fica vazia). */
+#define WIFI_LOG_ENABLED 0

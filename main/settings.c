@@ -32,6 +32,7 @@ static char             s_ble_pin[SETTINGS_BLE_PIN_MAX + 1];
 static uint8_t          s_theme;
 static uint8_t          s_auto_session;
 static char             s_agps_token[SETTINGS_AGPS_TOKEN_MAX];
+static char             s_agps_chip[SETTINGS_AGPS_CHIP_MAX];
 static uint8_t          s_ble_radio;
 static uint8_t          s_brightness;
 static uint8_t          s_scr_enabled;
@@ -113,6 +114,7 @@ void settings_init(void)
 
     /* Token AssistNow (A-GPS) - default vazio (nunca configurado) */
     load_str_or_default("agps_token", s_agps_token, sizeof(s_agps_token), "");
+    load_str_or_default("agps_chip", s_agps_chip, sizeof(s_agps_chip), "");
 
     /* Radio BLE - default ligado (comportamento historico) */
     uint8_t ble_radio_def = 1;
@@ -389,6 +391,18 @@ void settings_set_ble_radio(uint8_t enabled)
     }
 }
 
+const char *settings_get_agps_chip(void) { return s_agps_chip; }
+void settings_set_agps_chip(const char *chip)
+{
+    if (!chip) chip = "";
+    strncpy(s_agps_chip, chip, sizeof(s_agps_chip) - 1);
+    s_agps_chip[sizeof(s_agps_chip) - 1] = '\0';
+    if (s_nvs_ok) {
+        nvs_set_str(s_nvs, "agps_chip", s_agps_chip);
+        nvs_commit(s_nvs);
+    }
+}
+
 const char *settings_get_agps_token(void) { return s_agps_token; }
 void settings_set_agps_token(const char *token)
 {
@@ -450,6 +464,7 @@ bool settings_backup_to_file(const char *path)
     fprintf(f, "theme=%u\n",        (unsigned)s_theme);
     fprintf(f, "auto_sess=%u\n",    (unsigned)s_auto_session);
     fprintf(f, "agps_token=%s\n",   s_agps_token);
+    fprintf(f, "agps_chip=%s\n",    s_agps_chip);
     fprintf(f, "ble_radio=%u\n",    (unsigned)s_ble_radio);
     fprintf(f, "bright=%u\n",       (unsigned)s_brightness);
     fprintf(f, "scr_en=%u\n",       (unsigned)s_scr_enabled);
@@ -500,6 +515,7 @@ bool settings_restore_from_file(const char *path)
         else if (!strcmp(key, "theme"))      settings_set_theme((uint8_t)atoi(val));
         else if (!strcmp(key, "auto_sess"))  settings_set_auto_session((uint8_t)atoi(val));
         else if (!strcmp(key, "agps_token")) settings_set_agps_token(val);
+        else if (!strcmp(key, "agps_chip")) settings_set_agps_chip(val);
         else if (!strcmp(key, "ble_radio"))  settings_set_ble_radio((uint8_t)atoi(val));
         else if (!strcmp(key, "bright"))     settings_set_brightness((uint8_t)atoi(val));
         else if (!strcmp(key, "scr_en"))     settings_set_screensaver_enabled((uint8_t)atoi(val));

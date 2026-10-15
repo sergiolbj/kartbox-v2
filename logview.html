@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="pt-br"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KartBox - log</title>
+<style>
+:root{--bg:#0d0f0d;--surface:#141714;--line:#262626;--text:#f5f8f5;--muted:#7a847a;--green:#3ee07a;--gold:#ffd700;--red:#ff5a5a;--cyan:#3ec6e0}
+*{box-sizing:border-box}
+body{margin:0;padding:12px;background:var(--bg);color:var(--text);font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;display:flex;flex-direction:column;height:100vh}
+h1{margin:0 0 8px;font-size:18px;color:var(--green)}
+a{color:var(--cyan);text-decoration:none}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:6px 0}
+button,input{background:var(--surface);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:7px 11px;font-size:14px;min-height:36px}
+button{cursor:pointer}
+input{flex:1;min-width:140px}
+#st{color:var(--muted);font-size:12px}
+pre{flex:1;margin:6px 0 0;padding:10px;overflow:auto;background:#080a08;border:1px solid var(--line);border-radius:8px;font:12px/1.35 ui-monospace,Consolas,monospace;white-space:pre-wrap;word-break:break-all}
+.E{color:var(--red)}.W{color:var(--gold)}.I{color:var(--green)}
+</style></head><body>
+<h1>KartBox - log do sistema</h1>
+<div class="bar"><a href="/">&larr; sessoes</a>
+<input id="f" placeholder="filtro (ex: GNSS|A-GPS|UART)">
+<button id="bp">Pausar</button><button id="bc">Limpar</button><button id="bd">Baixar</button>
+<label><input type="checkbox" id="as" checked style="min-height:0;flex:none"> rolar</label>
+<span id="st"></span></div>
+<pre id="o"></pre>
+<script>
+var since=0,paused=false,lines=[],MAX=3000,$=function(i){return document.getElementById(i)},partial='';
+function cls(l){return /^E /.test(l)?'E':/^W /.test(l)?'W':/^I /.test(l)?'I':''}
+function esc(s){return s.replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c]})}
+function render(){
+ var re=null;try{if($('f').value)re=new RegExp($('f').value,'i')}catch(e){}
+ var h=[];for(var i=0;i<lines.length;i++){var l=lines[i];if(re&&!re.test(l))continue;var c=cls(l);h.push(c?'<span class="'+c+'">'+esc(l)+'</span>':esc(l))}
+ var o=$('o');o.innerHTML=h.join('\n');if($('as').checked)o.scrollTop=o.scrollHeight}
+function poll(){
+ if(paused){setTimeout(poll,1000);return}
+ fetch('/api/log?since='+since,{cache:'no-store'}).then(function(r){
+  var nx=parseInt(r.headers.get('X-Next')||'0',10);
+  return r.text().then(function(t){return {t:t,nx:nx}})}).then(function(x){
+  if(x.nx<since){lines=[];partial=''}     /* reiniciou */
+  since=x.nx;
+  if(x.t){var t=(partial+x.t.replace(/\x1b\[[0-9;]*m/g,'').replace(/\r/g,'')),p=t.split('\n');partial=p.pop();
+   for(var i=0;i<p.length;i++)lines.push(p[i]);if(lines.length>MAX)lines=lines.slice(-MAX);render()}
+  $('st').textContent='ao vivo';setTimeout(poll,1000)
+ }).catch(function(){$('st').textContent='sem conexao';setTimeout(poll,2000)})}
+$('bp').onclick=function(){paused=!paused;this.textContent=paused?'Continuar':'Pausar'};
+$('bc').onclick=function(){lines=[];render()};
+$('f').oninput=render;
+$('bd').onclick=function(){var b=new Blob([lines.join('\n')],{type:'text/plain'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='kartbox-log.txt';a.click()};
+poll();
+</script></body></html>

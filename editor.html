@@ -92,7 +92,11 @@
     <div class="sub">Gera arquivo <b>.trk</b> binário no mesmo layout de bytes que o firmware espera (track_manager.c). Marque a linha de chegada e, se quiser, até 2 setores.</div>
 
     <div class="banner" id="secBanner">
-      Sua localização (GPS do celular) só funciona em "contexto seguro" (https, localhost ou arquivo local). Essa página foi aberta sem isso, então o botão "usar minha localização" pode falhar. Marcar no mapa manualmente e a sincronia com o kartbox continuam funcionando normal.
+      <b>Atenção:</b> esta página foi aberta por um endereço <code>http://</code> (ex: o do próprio kartbox). Nesse tipo de endereço o navegador bloqueia o GPS do celular, e ligar os dados móveis (4G/5G) <b>não muda isso</b>, porque depende do tipo de endereço, não da internet. O botão "usar minha localização" pode falhar.<br>
+      O que continua funcionando normal: marcar o ponto no mapa tocando nele (o mapa carrega pela internet do celular) e sincronizar com o kartbox.<br>
+      <b>Opção 1 (mais fácil):</b> use o botão <b>"📡 Usar GPS do kartbox"</b> em cada ponto. Ele pega a posição do módulo GPS do próprio kartbox (precisa de fix, ao ar livre) e não depende do navegador.<br>
+      <b>Opção 2 (libera o GPS do celular, uma vez só):</b> no Chrome do celular abra <code>chrome://flags/#unsafely-treat-insecure-origin-as-secure</code>, digite o endereço do kartbox (ex: <code>http://192.168.4.1</code>), marque <b>Enabled</b> e toque em <b>Relaunch</b>. Vale só pra esse celular e esse navegador.<br>
+      <b>Opção 3:</b> salve este arquivo no celular e abra ele direto (arquivo local), ou use um endereço <code>https://</code>.
     </div>
 
     <label>Nome da pista</label>
@@ -312,6 +316,40 @@ function useMyLocation(key) {
 }
 
 // ---------------------------------------------------------------------
+// GPS do proprio kartbox - "usar GPS do kartbox" por ponto
+// Pega a posicao do modulo GPS do aparelho (GET /api/gps). Nao usa a
+// Geolocation do navegador, entao funciona mesmo em http:// (sem contexto
+// seguro). Precisa de fix valido (ao ar livre).
+// ---------------------------------------------------------------------
+async function useKartboxGps(key) {
+  const base = kbBaseUrl();
+  if (!base) { toast('Preencha o endereço do kartbox (campo de sincronização)', 4000); return; }
+  toast('Lendo GPS do kartbox...', 4000);
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 6000);
+  try {
+    const resp = await fetch(base + '/api/gps', { signal: ctl.signal, cache: 'no-store' });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const g = await resp.json();
+    if (!g.fix) {
+      toast(`Kartbox sem fix de GPS ainda (${g.sats} satélites). Leve ao ar livre e tente de novo.`, 5000);
+      return;
+    }
+    placeMarker(key, g.lat, g.lon);
+    // heading so e' confiavel em movimento; parado o modulo manda lixo
+    if (g.speed >= 5 && g.heading >= 0) setHeading(key, g.heading);
+    map.setView([g.lat, g.lon], 18);
+    const acc = document.getElementById('acc_' + key);
+    if (acc) acc.textContent = `posição do GPS do kartbox (${g.sats} satélites) - arraste o pino pra ajustar`;
+    toast(`Posição do kartbox capturada (${g.sats} sats) - ajuste arrastando o pino se precisar`);
+  } catch (e) {
+    toast('Falha ao ler o GPS do kartbox: ' + (e.name === 'AbortError' ? 'sem resposta (confira o endereço/WiFi)' : e.message), 5000);
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+// ---------------------------------------------------------------------
 // Sidebar (cards por ponto)
 // ---------------------------------------------------------------------
 function buildCards() {
@@ -328,6 +366,7 @@ function buildCards() {
       </div>
       <div class="row">
         <button data-loc="${def.key}">📍 Usar minha localização</button>
+        <button data-kbgps="${def.key}">📡 Usar GPS do kartbox</button>
       </div>
       <div class="row">
         <button data-arm="${def.key}">Marcar no mapa</button>
@@ -348,6 +387,7 @@ function buildCards() {
   });
 
   wrap.querySelectorAll('[data-loc]').forEach(b => b.addEventListener('click', () => useMyLocation(b.dataset.loc)));
+  wrap.querySelectorAll('[data-kbgps]').forEach(b => b.addEventListener('click', () => useKartboxGps(b.dataset.kbgps)));
   wrap.querySelectorAll('[data-arm]').forEach(b => b.addEventListener('click', () => arm(b.dataset.arm)));
   wrap.querySelectorAll('[data-clear]').forEach(b => b.addEventListener('click', () => clearPoint(b.dataset.clear)));
 

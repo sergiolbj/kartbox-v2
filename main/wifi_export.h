@@ -53,6 +53,10 @@ typedef enum {
 
 void wifi_export_init(void);
 
+/** Engancha o ESP_LOG pra tambem alimentar a pagina /log (anel de 32KB).
+ *  Chamar o mais cedo possivel no app_main. Seguro chamar mais de uma vez. */
+void wifi_export_log_start(void);
+
 /** @return false se SD indisponivel, WiFi ja ativo, ou (modo STA) se
  *  nao conseguiu conectar dentro do timeout - ver
  *  wifi_export_get_sta_state() pro motivo exato depois de false. */
