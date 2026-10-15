@@ -161,6 +161,11 @@ void gps_load_finish_line(double lat, double lon, float heading_deg);
  *  de salvar a pista. */
 bool gps_get_finish_line(double *lat, double *lon, float *heading_deg);
 
+/** @brief Remove a linha de chegada atual (pista sem linha / pista nova).
+ *  Sem isso a linha da pista anterior continuava contando volta e era
+ *  gravada na pista nova ao salvar. */
+void gps_clear_finish_line(void);
+
 /** @brief QUALY ou CORRIDA - muda a regra de quando o timing comeca. */
 void gps_set_mode(gps_race_mode_t mode);
 

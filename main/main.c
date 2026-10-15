@@ -158,6 +158,8 @@ static void apply_track_cfg_to_gps(const track_config_t *cfg)
 {
     if (cfg->finish.is_set) {
         gps_load_finish_line(cfg->finish.lat, cfg->finish.lon, cfg->finish.heading_deg);
+    } else {
+        gps_clear_finish_line(); /* pista sem linha: nao herda a da pista anterior */
     }
     for (int i = 0; i < GPS_MAX_SECTORS; i++) {
         if (cfg->sectors[i].is_set) {
@@ -427,6 +429,10 @@ static void handle_event(const app_event_t *evt)
         ui_show_session_map(evt->data.session_index);
         break;
 
+    case APP_EVT_SESSION_REFRESH:
+        ui_refresh_session_list();
+        break;
+
     case APP_EVT_SD_WRITE_ERROR:
         ESP_LOGE(TAG, "Erro de escrita no SD reportado");
         break;
@@ -583,7 +589,9 @@ static void handle_event(const app_event_t *evt)
     }
 
     case APP_EVT_TRACK_NEW:
-        /* Limpa estado de pista atual no GPS */
+        /* Limpa estado de pista atual no GPS (inclui a linha de chegada,
+         * senao a pista nova seria salva com a linha da anterior) */
+        gps_clear_finish_line();
         for (int i = 0; i < GPS_MAX_SECTORS; i++) {
             gps_clear_sector_point(i);
             settings_clear_sector(i);

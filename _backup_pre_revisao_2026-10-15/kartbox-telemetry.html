@@ -1,0 +1,983 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0a0a0a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="application-name" content="KartBox">
+<!-- PWA: manifest inline (data URL - o app e' um arquivo unico, sem servidor
+     pra hospedar manifest.json separado). display:standalone tira a barra do
+     navegador quando instalado via "Adicionar a tela inicial" do Chrome.
+     Icone: SVG embutido (bandeira quadriculada estilizada). -->
+<link rel="manifest" href='data:application/manifest+json,{"name":"KartBox Telemetria","short_name":"KartBox","display":"standalone","orientation":"portrait","background_color":"%230a0a0a","theme_color":"%230a0a0a","start_url":".","icons":[{"src":"data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27%3E%3Crect width=%27100%27 height=%27100%27 rx=%2720%27 fill=%27%230a0a0a%27/%3E%3Cg fill=%27%234caf50%27%3E%3Crect x=%2722%27 y=%2726%27 width=%2714%27 height=%2714%27/%3E%3Crect x=%2750%27 y=%2726%27 width=%2714%27 height=%2714%27/%3E%3Crect x=%2736%27 y=%2740%27 width=%2714%27 height=%2714%27/%3E%3Crect x=%2764%27 y=%2740%27 width=%2714%27 height=%2714%27/%3E%3Crect x=%2722%27 y=%2754%27 width=%2714%27 height=%2714%27/%3E%3Crect x=%2750%27 y=%2754%27 width=%2714%27 height=%2714%27/%3E%3C/g%3E%3C/svg%3E","sizes":"any","type":"image/svg+xml"}]}'>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27%3E%3Crect width=%27100%27 height=%27100%27 rx=%2720%27 fill=%27%230a0a0a%27/%3E%3Cg fill=%27%234caf50%27%3E%3Crect x=%2722%27 y=%2726%27 width=%2714%27 height=%2714%27/%3E%3Crect x=%2750%27 y=%2726%27 width=%2714%27 height=%2714%27/%3E%3Crect x=%2736%27 y=%2740%27 width=%2714%27 height=%2714%27/%3E%3Crect x=%2764%27 y=%2740%27 width=%2714%27 height=%2714%27/%3E%3Crect x=%2722%27 y=%2754%27 width=%2714%27 height=%2714%27/%3E%3Crect x=%2750%27 y=%2754%27 width=%2714%27 height=%2714%27/%3E%3C/g%3E%3C/svg%3E">
+<title>KartBox</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;background:#f5f5f5;color:#1a1a1a;font-family:'Courier New',monospace}
+body{display:flex;flex-direction:column}
+button,input,select{-webkit-appearance:none;appearance:none;font-family:'Courier New',monospace}
+button{cursor:pointer}
+
+/* ── App container ── */
+#app{display:flex;flex-direction:column;flex:1;overflow:hidden}
+
+/* ── Desktop: card centralizado ── */
+@media(min-width:600px){
+  html,body{overflow:auto;background:#e8e8e8}
+  body{align-items:center;justify-content:flex-start;padding:28px 16px 40px;min-height:100%}
+  #app{width:440px;flex:none;border-radius:16px;box-shadow:0 8px 40px rgba(0,0,0,.14);overflow:hidden;
+       height:min(820px,calc(100vh - 56px));position:relative}
+  /* Telemetria: números maiores no desktop */
+  #spd-val{font-size:110px}
+  #delta-val{font-size:44px}
+}
+
+/* STATUS BAR */
+#sbar{height:44px;background:#ffffff;border-bottom:1px solid #e0e0e0;display:flex;align-items:center;padding:0 14px;gap:10px;flex-shrink:0;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex-shrink:0}
+#ble-name{font-size:11px;color:#999;flex:1}
+#gps-row{font-size:10px;color:#999;display:none;align-items:center;gap:5px}
+#btn-disc{padding:5px 11px;border:1px solid #ffcdd2;background:#fff5f5;color:#e53935;font-size:10px;border-radius:3px;display:none}
+#btn-disc:active{opacity:.6}
+
+/* CONNECT */
+#conn-screen{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:28px;padding:32px;background:#ffffff}
+#btn-conn{width:100%;max-width:280px;padding:15px;border:1px solid #4caf50;background:#f1f8f1;color:#2e7d32;font-size:14px;border-radius:6px;letter-spacing:1.5px}
+#btn-conn:disabled{opacity:.4}
+#btn-conn:not(:disabled):active{opacity:.6}
+#conn-err{font-size:11px;color:#e53935;text-align:center;min-height:16px}
+.hint{font-size:11px;color:#bbb;text-align:center;line-height:1.9}
+
+/* MAIN (tabs) */
+#main{flex:1;display:none;flex-direction:column;overflow:hidden}
+#tabbar{height:44px;background:#ffffff;border-bottom:1px solid #e0e0e0;display:flex;flex-shrink:0;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.tb{flex:1;background:transparent;border:none;border-bottom:2px solid transparent;color:#bbb;font-size:10px;font-weight:bold;letter-spacing:.5px}
+.tb.on{color:#2e7d32;border-bottom-color:#4caf50}
+#pages{flex:1;position:relative;overflow:hidden}
+.page{position:absolute;inset:0;overflow-y:auto;display:none;background:#f5f5f5}
+.page.on{display:block}
+
+/* ── TELEMETRIA ── */
+#spd-sec{display:flex;flex-direction:column;align-items:center;padding:14px 0 8px;border-bottom:1px solid #e8e8e8;background:#ffffff}
+#spd-val{font-size:100px;font-weight:bold;color:#111;line-height:1;letter-spacing:-6px}
+#spd-unit{font-size:12px;color:#bbb;letter-spacing:3px;margin-top:2px}
+#times{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #e8e8e8;background:#ffffff}
+.tblk{padding:12px 16px;border-right:1px solid #e8e8e8}
+.tblk:last-child{border-right:none}
+.tlbl{font-size:9px;color:#bbb;letter-spacing:1px;text-transform:uppercase}
+.tval{font-size:22px;font-weight:bold;color:#555;letter-spacing:-1px;margin-top:4px}
+.tval.green{color:#2e7d32}
+#delta-sec{padding:10px 16px;border-bottom:1px solid #e8e8e8;text-align:center;background:#ffffff}
+#delta-lbl{font-size:9px;color:#bbb;letter-spacing:1px}
+#delta-val{font-size:40px;font-weight:bold;color:#ccc;letter-spacing:-2px;margin-top:2px}
+#delta-val.ahead{color:#2e7d32}
+#delta-val.behind{color:#e53935}
+#btm{display:flex;padding:8px 14px 6px;align-items:baseline;gap:10px;border-bottom:1px solid #e8e8e8;flex-shrink:0;background:#ffffff}
+#lap-lbl{font-size:9px;color:#bbb;letter-spacing:1px}
+#lap-num{font-size:24px;font-weight:bold;color:#999}
+#coords{font-size:10px;color:#ccc;text-align:center;padding:4px 0 6px;letter-spacing:.3px}
+
+/* ── HISTÓRICO DE VOLTAS ── */
+#lap-hist-hdr{display:none;grid-template-columns:32px 1fr 1fr 1fr;padding:4px 14px;border-bottom:1px solid #efefef;gap:4px;background:#fafafa}
+#lap-hist-hdr span{font-size:8px;color:#bbb;letter-spacing:.8px;text-transform:uppercase}
+#lap-hist-rows .lrow{display:grid;grid-template-columns:32px 1fr 1fr 1fr;padding:5px 14px;border-bottom:1px solid #f0f0f0;gap:4px;align-items:center;background:#ffffff}
+#lap-hist-rows .lrow.best{background:#f1f8f1}
+#lap-hist-rows .lrow .ln{font-size:11px;color:#ccc}
+#lap-hist-rows .lrow.best .ln{color:#2e7d32}
+#lap-hist-rows .lrow .lt{font-size:12px;font-weight:bold;color:#888}
+#lap-hist-rows .lrow.best .lt{color:#2e7d32}
+#lap-hist-rows .lrow .ld{font-size:11px;color:#aaa}
+#lap-hist-rows .lrow .ld.pos{color:#e53935}
+#lap-hist-rows .lrow .ld.neg{color:#2e7d32}
+#lap-hist-rows .lrow .lv{font-size:10px;color:#bbb}
+
+/* ── FORM (config + outras abas) ── */
+.section{padding:10px 14px 4px;font-size:9px;color:#bbb;letter-spacing:1px;text-transform:uppercase;background:#f5f5f5}
+.row{display:flex;align-items:center;min-height:44px;padding:0 14px;border-bottom:1px solid #efefef;background:#ffffff}
+.row-lbl{font-size:11px;color:#555;flex:1}
+.finp{height:30px;background:#f8f8f8;border:1px solid #e0e0e0;color:#333;font-size:11px;padding:0 8px;border-radius:3px;width:160px;outline:none}
+.finp:focus{border-color:#4caf50}
+.fsel{height:30px;background:#f8f8f8;border:1px solid #e0e0e0;color:#333;font-size:11px;padding:0 6px;border-radius:3px;width:160px;outline:none}
+.fnote{font-size:10px;color:#bbb;padding:4px 14px 8px;line-height:1.6;background:#f5f5f5}
+
+/* Botões de ação */
+.abtn{display:block;margin:8px 14px;padding:10px;border:1px solid #e0e0e0;background:#ffffff;color:#555;font-size:11px;border-radius:4px;text-align:center;width:calc(100% - 28px);letter-spacing:.3px}
+.abtn:active{opacity:.6}
+.abtn.g{border-color:#4caf50;background:#f1f8f1;color:#2e7d32}
+.abtn.r{border-color:#ffcdd2;background:#fff5f5;color:#e53935}
+
+/* Lista de tracks/sessoes */
+.list-item{display:flex;align-items:center;padding:10px 14px;border-bottom:1px solid #efefef;gap:10px;background:#ffffff}
+.list-name{flex:1;font-size:12px;color:#333}
+.list-sub{font-size:10px;color:#bbb;margin-top:2px}
+.ibtn{height:26px;padding:0 10px;border:1px solid #e0e0e0;background:#f8f8f8;color:#777;font-size:9px;border-radius:3px;flex-shrink:0}
+.ibtn:active{opacity:.6}
+.ibtn.g{border-color:#4caf50;background:#f1f8f1;color:#2e7d32}
+.ibtn.r{border-color:#ffcdd2;background:#fff5f5;color:#e53935}
+
+/* Status de operacao */
+#op-status{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#ffffff;border:1px solid #4caf50;border-radius:4px;padding:8px 20px;font-size:10px;color:#333;white-space:nowrap;display:none;z-index:99;box-shadow:0 2px 8px rgba(0,0,0,.12)}
+@media(min-width:600px){
+  #op-status{position:absolute;bottom:12px}
+}
+
+/* Mapa de pista */
+#trk-map{height:260px;background:#e8e8e8;border-top:1px solid #e0e0e0;border-bottom:1px solid #e0e0e0;position:relative;z-index:0}
+.map-btns{display:flex;gap:6px;padding:8px 14px;border-bottom:1px solid #efefef;flex-wrap:wrap;background:#ffffff}
+.mbtn{height:28px;padding:0 10px;border:1px solid #e0e0e0;background:#f8f8f8;color:#777;font-size:10px;border-radius:3px;white-space:nowrap}
+.mbtn:active{opacity:.6}
+.mbtn.finish{border-color:#4caf50;background:#f1f8f1;color:#2e7d32}
+.mbtn.s0{border-color:#90caf9;background:#e3f2fd;color:#1565c0}
+.mbtn.s1{border-color:#ffe082;background:#fffde7;color:#f57f17}
+.mbtn.pos{border-color:#e0e0e0;color:#888}
+</style>
+</head>
+<body>
+<div id="app">
+
+<!-- STATUS BAR -->
+<div id="sbar">
+  <div class="dot" id="ble-dot" style="background:#ddd"></div>
+  <span id="ble-name">desconectado</span>
+  <div id="gps-row">
+    <div class="dot" id="gps-dot" style="background:#ddd"></div>
+    <span id="gps-txt">GPS --</span>
+  </div>
+  <button id="btn-disc" onclick="disconnect()">✕ desconectar</button>
+</div>
+
+<!-- CONNECT -->
+<div id="conn-screen">
+  <div style="text-align:center">
+    <div style="font-size:30px;font-weight:bold;color:#4caf50;letter-spacing:3px">KARTBOX</div>
+    <div style="font-size:10px;color:#282828;letter-spacing:2px;margin-top:4px">CONTROLE BLE</div>
+  </div>
+  <button id="btn-conn" onclick="doConnect()">CONECTAR</button>
+  <div id="conn-err"></div>
+  <div class="hint">
+    Chrome Android · Bluetooth ativado<br>
+    KartBox ligado e anunciando
+  </div>
+</div>
+
+<!-- PIN AUTH -->
+<div id="pin-screen" style="display:none;flex:1;flex-direction:column;align-items:center;justify-content:center;gap:22px;padding:32px;background:#ffffff">
+  <div style="text-align:center">
+    <div style="font-size:22px;font-weight:bold;color:#1a1a1a;letter-spacing:2px">🔒 PIN</div>
+    <div style="font-size:11px;color:#888;margin-top:6px">Digite o PIN de segurança do KartBox</div>
+  </div>
+  <input id="pin-input" type="password" inputmode="numeric" maxlength="8"
+    placeholder="PIN (até 8 dígitos)"
+    style="width:100%;max-width:280px;padding:12px 14px;border:1px solid #e0e0e0;border-radius:6px;font-size:16px;letter-spacing:4px;text-align:center;font-family:'Courier New',monospace;outline:none"
+    onkeydown="if(event.key==='Enter')doAuth()">
+  <button onclick="doAuth()" style="width:100%;max-width:280px;padding:14px;border:1px solid #4caf50;background:#f1f8f1;color:#2e7d32;font-size:14px;border-radius:6px;letter-spacing:1.5px">AUTENTICAR</button>
+  <div id="pin-err" style="font-size:11px;color:#e53935;text-align:center;min-height:16px"></div>
+</div>
+
+<!-- MAIN -->
+<div id="main">
+  <div id="tabbar">
+    <button class="tb on" onclick="showTab(0)">TELEM</button>
+    <button class="tb"    onclick="showTab(1)">CONFIG</button>
+    <button class="tb"    onclick="showTab(2)">PISTAS</button>
+    <button class="tb"    onclick="showTab(3)">SESSÕES</button>
+  </div>
+  <div id="pages">
+
+    <!-- ── TELEMETRIA ── -->
+    <div class="page on" id="p0">
+      <div id="spd-sec">
+        <div id="spd-val">0</div>
+        <div id="spd-unit">KM / H</div>
+      </div>
+      <div id="times">
+        <div class="tblk"><div class="tlbl">ATUAL</div><div class="tval" id="d-atual">--.---</div></div>
+        <div class="tblk"><div class="tlbl">MELHOR</div><div class="tval green" id="d-best">--.---</div></div>
+      </div>
+      <div id="delta-sec">
+        <div id="delta-lbl">DELTA</div>
+        <div id="delta-val">--.-</div>
+      </div>
+      <div id="btm">
+        <div id="lap-lbl">VOLTA</div><div id="lap-num">0</div>
+      </div>
+      <div id="lap-hist-hdr">
+        <span>#</span><span>TEMPO</span><span>DELTA</span><span>VEL MAX</span>
+      </div>
+      <div id="lap-hist-rows"></div>
+      <div id="coords"></div>
+    </div>
+
+    <!-- ── CONFIG ── -->
+    <div class="page" id="p1">
+      <div class="section">Configurações do dispositivo</div>
+
+      <div class="row"><span class="row-lbl">Fuso horário</span>
+        <select class="fsel" id="cfg-utc">
+          <option value="-720">UTC-12:00</option><option value="-660">UTC-11:00</option>
+          <option value="-600">UTC-10:00</option><option value="-540">UTC-09:00</option>
+          <option value="-480">UTC-08:00</option><option value="-420">UTC-07:00</option>
+          <option value="-360">UTC-06:00</option><option value="-300">UTC-05:00</option>
+          <option value="-240">UTC-04:00</option><option value="-180" selected>UTC-03:00</option>
+          <option value="-120">UTC-02:00</option><option value="-60">UTC-01:00</option>
+          <option value="0">UTC+00:00</option><option value="60">UTC+01:00</option>
+          <option value="120">UTC+02:00</option><option value="180">UTC+03:00</option>
+          <option value="240">UTC+04:00</option><option value="300">UTC+05:00</option>
+          <option value="360">UTC+06:00</option><option value="420">UTC+07:00</option>
+          <option value="480">UTC+08:00</option><option value="540">UTC+09:00</option>
+          <option value="600">UTC+10:00</option><option value="660">UTC+11:00</option>
+          <option value="720">UTC+12:00</option>
+        </select>
+      </div>
+      <div class="row"><span class="row-lbl">Raio do gate (m)</span>
+        <input class="finp" id="cfg-gate" type="number" min="3" max="30" value="15" style="width:90px">
+      </div>
+      <div class="row"><span class="row-lbl">Tempo mín. volta (s)</span>
+        <input class="finp" id="cfg-minlap" type="number" min="5" max="300" value="10" style="width:90px">
+      </div>
+      <div class="row"><span class="row-lbl">Nome BLE</span>
+        <input class="finp" id="cfg-blename" type="text" maxlength="31" value="KartBox">
+      </div>
+      <div class="row"><span class="row-lbl">Senha WiFi</span>
+        <input class="finp" id="cfg-wifipass" type="password" maxlength="31">
+      </div>
+      <div class="row"><span class="row-lbl">PIN BLE (até 8 chars)</span>
+        <input class="finp" id="cfg-pin" type="password" maxlength="8" placeholder="vazio = sem PIN">
+      </div>
+
+      <button class="abtn g" onclick="cfgLoad()">↓ Ler do dispositivo</button>
+      <button class="abtn"   onclick="cfgSave()">↑ Salvar no dispositivo</button>
+      <div class="fnote">Alterações são aplicadas imediatamente e persistem em NVS. PIN vazio desativa a autenticação.</div>
+    </div>
+
+    <!-- ── PISTAS ── -->
+    <div class="page" id="p2">
+      <div style="display:flex;align-items:center;padding:8px 14px;border-bottom:1px solid #181818;gap:8px">
+        <span style="font-size:10px;color:#444;flex:1">pistas salvas no SD</span>
+        <button class="ibtn g" onclick="trackLoad()">↓ atualizar</button>
+      </div>
+      <div id="track-list"><div style="padding:24px;font-size:11px;color:#2a2a2a;text-align:center">carregando...</div></div>
+
+      <div class="section" style="margin-top:8px">Nova / editar pista</div>
+      <div class="row"><span class="row-lbl">Nome</span>
+        <input class="finp" id="trk-name" type="text" maxlength="31" placeholder="nome da pista">
+      </div>
+
+      <!-- Mapa -->
+      <div id="trk-map"></div>
+      <div class="map-btns">
+        <button class="mbtn pos"    onclick="mapMyPos()">📍 Minha pos.</button>
+        <button class="mbtn finish" onclick="mapMark('finish')">🏁 Chegada</button>
+        <button class="mbtn s0"     onclick="mapMark('s0')">① Setor 1</button>
+        <button class="mbtn s1"     onclick="mapMark('s1')">② Setor 2</button>
+      </div>
+
+      <div class="row"><span class="row-lbl">Chegada</span>
+        <span id="trk-finish" style="font-size:10px;color:#555">—</span>
+      </div>
+      <div class="row"><span class="row-lbl">Setor 1</span>
+        <span id="trk-s0" style="font-size:10px;color:#555">—</span>
+      </div>
+      <div class="row"><span class="row-lbl">Setor 2</span>
+        <span id="trk-s1" style="font-size:10px;color:#555">—</span>
+      </div>
+      <button class="abtn g" onclick="trkSave()">↑ Salvar pista no SD</button>
+      <button class="abtn r" onclick="trkClear()">Limpar pontos</button>
+      <div class="fnote">Use os botões para marcar pontos na sua posição GPS atual. Arraste os pins para ajustar. Heading é capturado automaticamente pelo dispositivo.</div>
+    </div>
+
+    <!-- ── SESSÕES ── -->
+    <div class="page" id="p3">
+      <div style="display:flex;align-items:center;padding:8px 14px;border-bottom:1px solid #181818;gap:8px">
+        <span style="font-size:10px;color:#444;flex:1">sessões gravadas no SD</span>
+        <button class="ibtn g" onclick="sessLoad()">↓ atualizar</button>
+      </div>
+      <div id="sess-list"><div style="padding:24px;font-size:11px;color:#2a2a2a;text-align:center">carregando...</div></div>
+      <button class="abtn r" onclick="sessDelAll()" style="margin-top:8px">Apagar todas as sessões</button>
+    </div>
+
+  </div>
+</div>
+
+<div id="op-status"></div>
+
+</div><!-- #app -->
+<script>
+/* ── UUIDs ─────────────────────────────────────────────────────────── */
+const SVC_UUID  = 'a1b2c3d4-0001-4a5b-8c9d-0123456789ab';
+const CHR_TELEM = 'a1b2c3d4-0001-4a5b-8c9d-0123456789ab';
+const CHR_CMD   = 'a1b2c3d4-0003-4a5b-8c9d-0123456789ab';
+const CHR_RSP   = 'a1b2c3d4-0004-4a5b-8c9d-0123456789ab';
+
+/* ── Códigos de comando / status ────────────────────────────────────── */
+const CMD = { AUTH:0x00,
+              GET_SETTINGS:0x01, SET_SETTINGS:0x02, LIST_TRACKS:0x03,
+              GET_TRACK:0x04, PUT_TRACK:0x05, DEL_TRACK:0x06,
+              LIST_SESSIONS:0x10, GET_SESSION:0x11, DEL_ALL_SESSIONS:0x12 };
+const RSP = { OK:0x00, ERR:0x01, MORE:0x02 };
+
+/* ── Estado ─────────────────────────────────────────────────────────── */
+let dev = null, chrCmd = null;
+let s_seq = 0;
+/* Mapa seq → {resolve, reject, chunks[]} para comandos em andamento */
+const pending = new Map();
+
+/* Histórico de voltas da sessão atual */
+let lapHistory = [];
+let _prevLapNum = 0;
+let _prevBestMs = 0;
+let _lapMaxSpd  = 0;   /* pico de velocidade na volta atual */
+let _frozenDelta = null; /* delta da última volta concluída (null = sem referência) */
+
+/* Pista em edição (campos do form) */
+let trkDraft = { finish:{is_set:false,lat:0,lon:0,heading:0},
+                 s0:{is_set:false,lat:0,lon:0,heading:0},
+                 s1:{is_set:false,lat:0,lon:0,heading:0} };
+
+/* ── Helpers ─────────────────────────────────────────────────────────── */
+function fmt(ms) {
+  if (!ms) return '--.---';
+  const s = Math.floor(ms/1000), m = ms%1000;
+  return s+'.'+String(m).padStart(3,'0');
+}
+function status(msg, dur) {
+  const el = document.getElementById('op-status');
+  el.textContent = msg; el.style.display = 'block';
+  clearTimeout(el._t);
+  el._t = setTimeout(()=>el.style.display='none', dur||2500);
+}
+function nextSeq() { s_seq = (s_seq+1) & 0xFF; return s_seq; }
+
+/* ── Protocolo BLE cmd/rsp ───────────────────────────────────────────── */
+
+/** Envia um comando e retorna Promise<Uint8Array payload> */
+function sendCmd(cmd, payload) {
+  return new Promise((resolve, reject) => {
+    const seq = nextSeq();
+    const chunks = [];
+    pending.set(seq, { cmd, resolve, reject, chunks });
+
+    const plen = payload ? payload.length : 0;
+    const buf = new Uint8Array(2 + plen);
+    buf[0] = cmd; buf[1] = seq;
+    if (plen > 0) buf.set(payload, 2);
+
+    chrCmd.writeValueWithoutResponse(buf).catch(e => {
+      pending.delete(seq);
+      reject(e);
+    });
+
+    /* timeout de 8s */
+    setTimeout(() => {
+      if (pending.has(seq)) {
+        pending.delete(seq);
+        reject(new Error('timeout cmd=0x'+cmd.toString(16)));
+      }
+    }, 8000);
+  });
+}
+
+/** Chamado ao receber notify de RSP */
+function onRsp(event) {
+  const v = new DataView(event.target.value.buffer);
+  if (v.byteLength < 3) return;
+  const cmd    = v.getUint8(0);
+  const seq    = v.getUint8(1);
+  const status = v.getUint8(2);
+  const data   = new Uint8Array(event.target.value.buffer, 3);
+
+  const p = pending.get(seq);
+  if (!p) return;
+
+  if (status === RSP.ERR) {
+    pending.delete(seq);
+    p.reject(new Error('ERR: ' + new TextDecoder().decode(data)));
+    return;
+  }
+
+  /* Acumula chunks */
+  if (data.length > 0) p.chunks.push(data);
+
+  if (status === RSP.OK) {
+    pending.delete(seq);
+    /* Concatena todos os chunks */
+    const total = p.chunks.reduce((s,c)=>s+c.length, 0);
+    const merged = new Uint8Array(total);
+    let off = 0;
+    for (const c of p.chunks) { merged.set(c, off); off += c.length; }
+    p.resolve(merged);
+  }
+  /* RSP.MORE: aguarda mais chunks, nao resolve ainda */
+}
+
+/* ── Decode / encode helpers ─────────────────────────────────────────── */
+
+function decodeSettings(buf) {
+  const v = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  const dec = new TextDecoder();
+  return {
+    utc_offset_min: v.getInt16(0, true),
+    gate_radius_m:  v.getFloat32(2, true),
+    min_lap_ms:     v.getUint32(6, true),
+    ble_name:  dec.decode(buf.slice(10, 42)).replace(/\0/g,''),
+    wifi_pass: dec.decode(buf.slice(42, 74)).replace(/\0/g,''),
+    ble_pin:   dec.decode(buf.slice(74, 82)).replace(/\0/g,''),
+  };
+}
+
+function encodeSettings(s) {
+  const enc = new TextEncoder();
+  const buf = new Uint8Array(82);
+  const v   = new DataView(buf.buffer);
+  v.setInt16(0,   s.utc_offset_min, true);
+  v.setFloat32(2, s.gate_radius_m,  true);
+  v.setUint32(6,  s.min_lap_ms,     true);
+  const bn = enc.encode(s.ble_name.slice(0,31));
+  const wp = enc.encode(s.wifi_pass.slice(0,31));
+  const bp = enc.encode((s.ble_pin||'').slice(0,8));
+  buf.set(bn, 10);
+  buf.set(wp, 42);
+  buf.set(bp, 74);
+  return buf;
+}
+
+function decodeTrack(buf) {
+  const v   = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  const dec = new TextDecoder();
+  const TRACK_MAGIC = 0x4B545231;
+  return {
+    magic:          v.getUint32(0, true),
+    name:           dec.decode(buf.slice(4, 36)).replace(/\0/g,''),
+    finish: {
+      lat:     v.getFloat64(36, true),
+      lon:     v.getFloat64(44, true),
+      heading: v.getFloat32(52, true),
+      is_set:  v.getUint8(56) !== 0,
+    },
+    s0: {
+      lat:     v.getFloat64(57, true),
+      lon:     v.getFloat64(65, true),
+      heading: v.getFloat32(73, true),
+      is_set:  v.getUint8(77) !== 0,
+    },
+    s1: {
+      lat:     v.getFloat64(78, true),
+      lon:     v.getFloat64(86, true),
+      heading: v.getFloat32(94, true),
+      is_set:  v.getUint8(98) !== 0,
+    },
+  };
+}
+
+function encodeTrack(t) {
+  const buf = new Uint8Array(99);
+  const v   = new DataView(buf.buffer);
+  const enc = new TextEncoder();
+  v.setUint32(0, 0x4B545231, true);           /* TRACK_MAGIC */
+  const nm = enc.encode(t.name.slice(0,31));
+  buf.set(nm, 4);
+  v.setFloat64(36, t.finish.lat,     true);
+  v.setFloat64(44, t.finish.lon,     true);
+  v.setFloat32(52, t.finish.heading, true);
+  buf[56] = t.finish.is_set ? 1 : 0;
+  v.setFloat64(57, t.s0.lat,     true);
+  v.setFloat64(65, t.s0.lon,     true);
+  v.setFloat32(73, t.s0.heading, true);
+  buf[77] = t.s0.is_set ? 1 : 0;
+  v.setFloat64(78, t.s1.lat,     true);
+  v.setFloat64(86, t.s1.lon,     true);
+  v.setFloat32(94, t.s1.heading, true);
+  buf[98] = t.s1.is_set ? 1 : 0;
+  return buf;
+}
+
+function decodeTelemetry(buf) {
+  const v = new DataView(buf);
+  return {
+    lap_ms:  v.getUint32(0,  true),
+    delta_ms:v.getInt32(4,   true),
+    best_ms: v.getUint32(8,  true),
+    speed:   v.getUint16(12, true) / 10,
+    heading: v.getUint16(14, true) / 10,
+    lap_num: v.getUint16(16, true),
+    sats:    v.getUint8(18),
+    fix:     v.getUint8(19),
+    lat:     v.getInt32(20,  true) / 1e6,
+    lon:     v.getInt32(24,  true) / 1e6,
+  };
+}
+
+/* ── Histórico de voltas ─────────────────────────────────────────────── */
+function renderLapHist() {
+  const hdr  = document.getElementById('lap-hist-hdr');
+  const rows = document.getElementById('lap-hist-rows');
+  if (!lapHistory.length) { hdr.style.display='none'; rows.innerHTML=''; return; }
+  hdr.style.display='grid';
+  /* índice da melhor volta */
+  let bestIdx=0;
+  lapHistory.forEach((l,i)=>{ if(l.ms<lapHistory[bestIdx].ms) bestIdx=i; });
+  rows.innerHTML = [...lapHistory].reverse().map(l => {
+    const isBest = lapHistory.indexOf(l)===bestIdx;
+    /* isBest pelo n (lap number) pois a cópia invertida mantém referência */
+    const ib = l.n === lapHistory[bestIdx].n;
+    const dSign = l.delta>0?'+':'';
+    const dStr  = l.n===1 ? '—' : dSign+(l.delta/1000).toFixed(3);
+    const dCls  = l.delta<0?'neg':l.delta>0?'pos':'';
+    return `<div class="lrow${ib?' best':''}">
+      <span class="ln">${ib?'★':l.n}</span>
+      <span class="lt">${fmt(l.ms)}</span>
+      <span class="ld ${dCls}">${dStr}</span>
+      <span class="lv">${l.vmax} km/h</span>
+    </div>`;
+  }).join('');
+}
+
+/* ── Atualização da UI de telemetria ─────────────────────────────────── */
+function updateTelem(p) {
+  /* Pico de velocidade na volta corrente */
+  if (p.speed > _lapMaxSpd) _lapMaxSpd = p.speed;
+
+  /* Detecta conclusão de volta (lap_num cresceu) */
+  if (p.lap_num > _prevLapNum && _prevLapNum > 0) {
+    /* Calcula delta correto:
+       O firmware faz delta = last - best APÓS atualizar best, então:
+       - novo recorde: delta_ms==0, best_ms caiu → delta real = new_best - old_best (negativo)
+       - mais lento:   delta_ms > 0                                                          */
+    let lapDelta;
+    if (_prevBestMs > 0 && p.best_ms < _prevBestMs) {
+      /* novo recorde: melhora em relação ao best anterior */
+      lapDelta = p.best_ms - _prevBestMs;  /* negativo */
+    } else {
+      lapDelta = p.delta_ms;               /* ≥ 0 */
+    }
+    _frozenDelta = lapDelta;
+
+    const lap_time_ms = lapDelta <= 0 ? p.best_ms : p.best_ms + lapDelta;
+    lapHistory.push({ n:_prevLapNum, ms:lap_time_ms, delta:lapDelta, vmax:Math.round(_lapMaxSpd) });
+    _lapMaxSpd = 0;
+    renderLapHist();
+  }
+  _prevLapNum = p.lap_num;
+  _prevBestMs = p.best_ms;
+
+  document.getElementById('spd-val').textContent = Math.round(p.speed);
+  document.getElementById('d-atual').textContent = fmt(p.lap_ms);
+  document.getElementById('d-best').textContent  = p.best_ms ? fmt(p.best_ms) : '--.---';
+  document.getElementById('lap-num').textContent = p.lap_num;
+  const dv = document.getElementById('delta-val');
+  if (_frozenDelta === null) { dv.textContent='--.-'; dv.className=''; }
+  else {
+    const sign = _frozenDelta > 0 ? '+' : '';
+    dv.textContent = sign + (_frozenDelta/1000).toFixed(3);
+    dv.className = _frozenDelta <= 0 ? 'ahead' : 'behind';
+  }
+  document.getElementById('gps-dot').style.background = p.fix ? '#4caf50' : '#ef9a9a';
+  document.getElementById('gps-txt').textContent = 'GPS '+p.sats;
+  if (p.fix) document.getElementById('coords').textContent =
+    p.lat.toFixed(5)+'°  '+p.lon.toFixed(5)+'°';
+}
+
+/* ── Navegação de abas ──────────────────────────────────────────────── */
+function showTab(i) {
+  document.querySelectorAll('.tb').forEach((b,j)=>b.classList.toggle('on',j===i));
+  document.querySelectorAll('.page').forEach((p,j)=>p.classList.toggle('on',j===i));
+  if (i === 2) {
+    /* Inicializa mapa na primeira vez; sempre corrige tamanho */
+    if (!trkMap) mapInit();
+    else setTimeout(()=>trkMap.invalidateSize(), 50);
+  }
+}
+
+/* ── Mapa de pista (Leaflet) ─────────────────────────────────────────── */
+let trkMap = null;
+let mapDeviceHeading = 0;   /* bússola do celular, graus 0-360 */
+const mapMarkers = { finish: null, s0: null, s1: null };
+
+const mapColors = {
+  finish: { color:'#4caf50', label:'🏁' },
+  s0:     { color:'#3a6ad4', label:'①' },
+  s1:     { color:'#d4a03a', label:'②' },
+};
+
+function mapIcon(key) {
+  const c = mapColors[key];
+  return L.divIcon({
+    className: '',
+    html: `<div style="width:32px;height:32px;background:${c.color};border:2px solid #0a0a0a;border-radius:50% 50% 50% 0;transform:rotate(-45deg);display:flex;align-items:center;justify-content:center">
+             <span style="transform:rotate(45deg);font-size:13px;line-height:1">${c.label}</span></div>`,
+    iconSize: [32,32], iconAnchor:[16,32],
+  });
+}
+
+function mapInit() {
+  /* Começa no centro do Brasil; será recentrado ao pegar GPS */
+  trkMap = L.map('trk-map', { zoomControl:true, attributionControl:false })
+             .setView([-15.77, -47.93], 15);
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 20,
+  }).addTo(trkMap);
+
+  /* Restaura markers que já existiam no trkDraft */
+  ['finish','s0','s1'].forEach(k => {
+    const p = trkDraft[k==='finish'?'finish':k];
+    if (p && p.is_set) mapPlaceMarker(k, p.lat, p.lon, p.heading_deg||0);
+  });
+
+  /* Tenta centralizar no GPS do device imediatamente */
+  mapMyPos();
+
+  /* Captura bússola (iOS pede permissão) */
+  if (typeof DeviceOrientationEvent !== 'undefined' &&
+      typeof DeviceOrientationEvent.requestPermission === 'function') {
+    DeviceOrientationEvent.requestPermission().catch(()=>{});
+  }
+  window.addEventListener('deviceorientationabsolute', mapOrientation, true);
+  window.addEventListener('deviceorientation',         mapOrientation, true);
+
+  setTimeout(()=>trkMap.invalidateSize(), 100);
+}
+
+function mapOrientation(e) {
+  /* iOS: webkitCompassHeading (0=norte, CW). Android: 360-alpha */
+  if (e.webkitCompassHeading !== undefined) {
+    mapDeviceHeading = e.webkitCompassHeading;
+  } else if (e.absolute && e.alpha !== null) {
+    mapDeviceHeading = (360 - e.alpha) % 360;
+  }
+}
+
+function mapMyPos() {
+  if (!navigator.geolocation) { status('Geolocalização não suportada'); return; }
+  status('Buscando GPS...');
+  navigator.geolocation.getCurrentPosition(pos => {
+    const { latitude: lat, longitude: lon } = pos.coords;
+    if (trkMap) trkMap.setView([lat, lon], 19);
+    status('GPS ✓');
+  }, () => status('GPS indisponível'));
+}
+
+function mapMark(key) {
+  if (!navigator.geolocation) { status('GPS indisponível'); return; }
+  status('Marcando...');
+  navigator.geolocation.getCurrentPosition(pos => {
+    const lat = pos.coords.latitude;
+    const lon = pos.coords.longitude;
+    const hdg = mapDeviceHeading;
+    mapPlaceMarker(key, lat, lon, hdg);
+    if (trkMap) trkMap.setView([lat, lon], 19);
+    status(mapColors[key].label + ' marcado ✓');
+  }, () => status('GPS indisponível'));
+}
+
+function mapPlaceMarker(key, lat, lon, hdg) {
+  if (mapMarkers[key]) mapMarkers[key].remove();
+
+  const m = L.marker([lat, lon], {
+    icon:      mapIcon(key),
+    draggable: true,
+    title:     key,
+  }).addTo(trkMap);
+
+  m.on('dragend', () => {
+    const p = m.getLatLng();
+    mapUpdateDraft(key, p.lat, p.lng, mapDeviceHeading);
+  });
+
+  mapMarkers[key] = m;
+  mapUpdateDraft(key, lat, lon, hdg);
+}
+
+function mapUpdateDraft(key, lat, lon, hdg) {
+  const field = key === 'finish' ? 'finish' : key;
+  trkDraft[field] = { is_set:true, lat, lon, heading: hdg };
+  updTrkForm();
+}
+
+/* ── Conexão BLE ─────────────────────────────────────────────────────── */
+async function doConnect() {
+  const errEl = document.getElementById('conn-err');
+  const btn   = document.getElementById('btn-conn');
+  errEl.textContent = '';
+  if (!navigator.bluetooth) { errEl.textContent='Web Bluetooth não suportado.'; return; }
+
+  btn.disabled = true; btn.textContent = 'aguardando...';
+  try {
+    dev = await navigator.bluetooth.requestDevice({
+      filters: [{ name: 'KartBox' }],
+      optionalServices: [SVC_UUID]
+    });
+    dev.addEventListener('gattserverdisconnected', onDisconn);
+    btn.textContent = 'conectando...';
+
+    const server  = await dev.gatt.connect();
+    const service = await server.getPrimaryService(SVC_UUID);
+
+    /* Telemetria */
+    const chrTelem = await service.getCharacteristic(CHR_TELEM);
+    chrTelem.addEventListener('characteristicvaluechanged', e =>
+      updateTelem(decodeTelemetry(e.target.value.buffer)));
+    await chrTelem.startNotifications();
+
+    /* Controle */
+    chrCmd = await service.getCharacteristic(CHR_CMD);
+    const chrRsp = await service.getCharacteristic(CHR_RSP);
+    chrRsp.addEventListener('characteristicvaluechanged', onRsp);
+    await chrRsp.startNotifications();
+
+    setBle(true, dev.name);
+    document.getElementById('conn-screen').style.display = 'none';
+    document.getElementById('gps-row').style.display = 'flex';
+
+    /* Parte A — tenta auth com PIN vazio; se falhar mostra tela de PIN */
+    try {
+      await sendCmd(CMD.AUTH, new Uint8Array(0));
+      /* PIN desativado no dispositivo — entra direto */
+      showMain();
+    } catch(e) {
+      /* PIN requerido */
+      document.getElementById('pin-screen').style.display = 'flex';
+      document.getElementById('pin-input').focus();
+    }
+
+  } catch(e) {
+    errEl.textContent = e.message || 'Falha ao conectar.';
+    btn.disabled = false; btn.textContent = 'CONECTAR';
+  }
+}
+
+async function doAuth() {
+  const input  = document.getElementById('pin-input');
+  const errEl  = document.getElementById('pin-err');
+  const pin    = input.value.trim();
+  errEl.textContent = '';
+  try {
+    const enc = new TextEncoder();
+    await sendCmd(CMD.AUTH, enc.encode(pin));
+    document.getElementById('pin-screen').style.display = 'none';
+    showMain();
+  } catch(e) {
+    errEl.textContent = 'PIN incorreto. Tente novamente.';
+    input.value = '';
+    input.focus();
+  }
+}
+
+function showMain() {
+  document.getElementById('main').style.display = 'flex';
+  cfgLoad();
+  trackLoad();
+  sessLoad();
+}
+
+function onDisconn() {
+  setBle(false);
+  lapHistory=[]; _prevLapNum=0; _prevBestMs=0; _lapMaxSpd=0; _frozenDelta=null;
+  renderLapHist();
+  document.getElementById('conn-screen').style.display = 'flex';
+  document.getElementById('pin-screen').style.display  = 'none';
+  document.getElementById('main').style.display        = 'none';
+  document.getElementById('gps-row').style.display     = 'none';
+  document.getElementById('pin-input').value  = '';
+  document.getElementById('pin-err').textContent = '';
+  const btn = document.getElementById('btn-conn');
+  btn.disabled = false; btn.textContent = 'CONECTAR';
+}
+async function disconnect() { if (dev?.gatt?.connected) dev.gatt.disconnect(); }
+function setBle(ok, name) {
+  document.getElementById('ble-dot').style.background = ok ? '#1976d2' : '#ddd';
+  document.getElementById('ble-name').textContent     = ok ? (name||'KartBox') : 'desconectado';
+  document.getElementById('ble-name').style.color     = ok ? '#1976d2' : '#999';
+  document.getElementById('btn-disc').style.display   = ok ? 'block' : 'none';
+}
+
+/* ── CONFIG ──────────────────────────────────────────────────────────── */
+async function cfgLoad() {
+  try {
+    status('Lendo configurações...');
+    const data = await sendCmd(CMD.GET_SETTINGS);
+    const s = decodeSettings(data);
+    document.getElementById('cfg-utc').value     = s.utc_offset_min;
+    document.getElementById('cfg-gate').value    = s.gate_radius_m.toFixed(1);
+    document.getElementById('cfg-minlap').value  = (s.min_lap_ms/1000).toFixed(0);
+    document.getElementById('cfg-blename').value = s.ble_name;
+    document.getElementById('cfg-wifipass').value= s.wifi_pass;
+    document.getElementById('cfg-pin').value     = s.ble_pin;
+    status('Configurações carregadas ✓');
+  } catch(e) { status('Erro: '+e.message); }
+}
+async function cfgSave() {
+  try {
+    status('Salvando...');
+    const s = {
+      utc_offset_min: parseInt(document.getElementById('cfg-utc').value),
+      gate_radius_m:  parseFloat(document.getElementById('cfg-gate').value),
+      min_lap_ms:     parseInt(document.getElementById('cfg-minlap').value) * 1000,
+      ble_name:  document.getElementById('cfg-blename').value,
+      wifi_pass: document.getElementById('cfg-wifipass').value,
+      ble_pin:   document.getElementById('cfg-pin').value,
+    };
+    await sendCmd(CMD.SET_SETTINGS, encodeSettings(s));
+    status('Configurações salvas ✓');
+  } catch(e) { status('Erro: '+e.message); }
+}
+
+/* ── PISTAS ───────────────────────────────────────────────────────────── */
+async function trackLoad() {
+  try {
+    status('Carregando pistas...');
+    const data = await sendCmd(CMD.LIST_TRACKS);
+    const names = new TextDecoder().decode(data).split('\n').filter(n=>n.trim());
+    const list  = document.getElementById('track-list');
+    if (!names.length) {
+      list.innerHTML = '<div style="padding:24px;font-size:11px;color:#2a2a2a;text-align:center">nenhuma pista salva</div>';
+      status('Nenhuma pista encontrada');
+      return;
+    }
+    list.innerHTML = names.map(n => `
+      <div class="list-item">
+        <div><div class="list-name">${n}</div></div>
+        <button class="ibtn g" onclick="trkEdit('${n}')">editar</button>
+        <button class="ibtn r" onclick="trkDel('${n}')">excluir</button>
+      </div>`).join('');
+    status(`${names.length} pista(s) carregada(s)`);
+  } catch(e) { status('Erro: '+e.message); }
+}
+
+async function trkEdit(name) {
+  try {
+    status('Carregando pista...');
+    const enc  = new TextEncoder();
+    const data = await sendCmd(CMD.GET_TRACK, enc.encode(name));
+    const trk  = decodeTrack(data);
+    /* Normaliza campo heading: decodeTrack retorna .heading, mapUpdateDraft também usa .heading */
+    trkDraft = {
+      finish: { ...trk.finish, heading: trk.finish.heading },
+      s0:     { ...trk.s0,     heading: trk.s0.heading },
+      s1:     { ...trk.s1,     heading: trk.s1.heading },
+    };
+    document.getElementById('trk-name').value = trk.name;
+    showTab(2);   /* abre aba (inicializa mapa se necessário) */
+    /* Planta markers após mapa estar pronto */
+    setTimeout(() => {
+      ['finish','s0','s1'].forEach(k => {
+        const p = trkDraft[k];
+        if (p && p.is_set) mapPlaceMarker(k, p.lat, p.lon, p.heading||0);
+      });
+      /* Centraliza no ponto de chegada */
+      if (trkDraft.finish.is_set)
+        trkMap.setView([trkDraft.finish.lat, trkDraft.finish.lon], 18);
+      updTrkForm();
+    }, 200);
+    status('Pista carregada: '+name);
+  } catch(e) { status('Erro: '+e.message); }
+}
+
+function updTrkForm() {
+  const rows = [
+    { key:'finish', el:'trk-finish', color:'#4caf50' },
+    { key:'s0',     el:'trk-s0',     color:'#3a6ad4' },
+    { key:'s1',     el:'trk-s1',     color:'#d4a03a' },
+  ];
+  rows.forEach(({ key, el, color }) => {
+    const p = trkDraft[key];
+    const span = document.getElementById(el);
+    if (p && p.is_set) {
+      span.textContent = `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}  hdg ${Math.round(p.heading||0)}°`;
+      span.style.color = color;
+    } else {
+      span.textContent = '—';
+      span.style.color = '#555';
+    }
+  });
+}
+
+async function trkSave() {
+  const name = document.getElementById('trk-name').value.trim();
+  if (!name) { status('Nome vazio'); return; }
+  try {
+    status('Salvando pista...');
+    const t = { name, finish:trkDraft.finish, s0:trkDraft.s0, s1:trkDraft.s1 };
+    await sendCmd(CMD.PUT_TRACK, encodeTrack(t));
+    status('Pista salva: '+name+' ✓');
+    trackLoad();
+  } catch(e) { status('Erro: '+e.message); }
+}
+
+async function trkDel(name) {
+  if (!confirm(`Excluir pista "${name}"?`)) return;
+  try {
+    status('Excluindo...');
+    const enc = new TextEncoder();
+    await sendCmd(CMD.DEL_TRACK, enc.encode(name));
+    status('Pista excluída ✓');
+    trackLoad();
+  } catch(e) { status('Erro: '+e.message); }
+}
+
+function trkClear() {
+  document.getElementById('trk-name').value = '';
+  trkDraft = { finish:{is_set:false,lat:0,lon:0,heading:0},
+               s0:{is_set:false,lat:0,lon:0,heading:0},
+               s1:{is_set:false,lat:0,lon:0,heading:0} };
+  /* Remove markers do mapa */
+  Object.keys(mapMarkers).forEach(k => {
+    if (mapMarkers[k]) { mapMarkers[k].remove(); mapMarkers[k]=null; }
+  });
+  updTrkForm();
+}
+
+/* ── SESSÕES ──────────────────────────────────────────────────────────── */
+async function sessLoad() {
+  try {
+    status('Carregando sessões...');
+    const data  = await sendCmd(CMD.LIST_SESSIONS);
+    const names = new TextDecoder().decode(data).split('\n').filter(n=>n.trim());
+    const list  = document.getElementById('sess-list');
+    if (!names.length) {
+      list.innerHTML = '<div style="padding:24px;font-size:11px;color:#2a2a2a;text-align:center">nenhuma sessão gravada</div>';
+      status('Nenhuma sessão encontrada');
+      return;
+    }
+    list.innerHTML = names.map(n => `
+      <div class="list-item">
+        <div><div class="list-name" style="font-size:11px">${n}</div></div>
+        <button class="ibtn g" onclick="sessDownload('${n}')">baixar</button>
+      </div>`).join('');
+    status(`${names.length} sessão(ões) encontrada(s)`);
+  } catch(e) { status('Erro: '+e.message); }
+}
+
+async function sessDownload(filename) {
+  try {
+    status('Baixando '+filename+'...');
+    const enc  = new TextEncoder();
+    const data = await sendCmd(CMD.GET_SESSION, enc.encode(filename));
+    const blob = new Blob([data], {type:'text/csv'});
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+    status('Download concluído ✓');
+  } catch(e) { status('Erro: '+e.message); }
+}
+
+async function sessDelAll() {
+  if (!confirm('Apagar TODAS as sessões do SD?')) return;
+  try {
+    status('Apagando...');
+    await sendCmd(CMD.DEL_ALL_SESSIONS);
+    status('Sessões apagadas ✓');
+    sessLoad();
+  } catch(e) { status('Erro: '+e.message); }
+}
+</script>
+</body>
+</html>

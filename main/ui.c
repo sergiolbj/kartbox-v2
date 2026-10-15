@@ -20,6 +20,7 @@
 #include "gps.h"
 #include "sd_logger.h"
 #include "ble_telemetry.h"
+#include "wifi_export.h"
 #include "battery.h"
 #include "display_init.h"
 
@@ -29,6 +30,9 @@
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
+#include <stdarg.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
 #include "esp_heap_caps.h"
@@ -265,6 +269,30 @@ static bool       s_delete_armed = false;
 static lv_timer_t *s_delete_arm_timer = NULL;
 static lv_timer_t *s_refresh_timer = NULL;
 static float       s_max_speed_kmh = 0.0f;
+
+/* Cache indice->nome das sessoes que estao NO DROPDOWN da aba VOLTAS.
+ * Antes, ui_show_session_laps/map refaziam sd_list_sessions() e usavam o
+ * indice do dropdown: se uma sessao nova fosse gravada depois do refresh, a
+ * lista (mais recente primeiro) deslocava e o indice apontava pra OUTRA
+ * sessao. Agora o indice sempre resolve pro nome que o usuario estava vendo.
+ * Mutex curto (so a copia do cache) - nunca segurado durante I/O de SD nem
+ * junto do lock do LVGL. */
+static char              s_sess_names[SD_MAX_SESSIONS_LISTED][SD_SESSION_NAME_LEN];
+static int               s_sess_count = 0;
+static SemaphoreHandle_t s_sess_mtx = NULL;
+
+static bool session_name_from_index(uint32_t idx, char out[SD_SESSION_NAME_LEN])
+{
+    bool ok = false;
+    if (s_sess_mtx) xSemaphoreTake(s_sess_mtx, portMAX_DELAY);
+    if ((int)idx < s_sess_count) {
+        memcpy(out, s_sess_names[idx], SD_SESSION_NAME_LEN);
+        out[SD_SESSION_NAME_LEN - 1] = '\0';
+        ok = true;
+    }
+    if (s_sess_mtx) xSemaphoreGive(s_sess_mtx);
+    return ok;
+}
 static int         s_slow_tick = 0;
 
 /* Toast - popup centralizado de feedback (linha marcada, etc.) */
@@ -989,7 +1017,8 @@ static void session_dropdown_event_cb(lv_event_t *e)
 static void refresh_btn_event_cb(lv_event_t *e)
 {
     (void)e;
-    ui_refresh_session_list();
+    /* I/O de SD NAO roda aqui (taskLVGL) - posta pro dispatcher do main */
+    app_event_post(APP_EVT_SESSION_REFRESH, EVT_SRC_TOUCH);
 }
 
 static void map_btn_event_cb(lv_event_t *e)
@@ -1088,10 +1117,8 @@ static void build_laps_tab(lv_obj_t *parent)
     lv_obj_add_flag(s_laps_list, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scroll_dir(s_laps_list, LV_DIR_VER);
 
-    /* Leitura de volta-a-volta do CSV da sessao selecionada ainda
-     * depende de uma funcao nova em sd_logger.h (ex: sd_read_session_laps).
-     * Por enquanto a lista so confirma a selecao - dado completo entra
-     * numa proxima etapa. */
+    /* Placeholder inicial; a lista real e montada por ui_show_session_laps()
+     * (sd_read_session_laps) ao escolher uma sessao no dropdown. */
     lv_obj_t *placeholder = lv_label_create(s_laps_list);
     lv_obj_set_style_text_font(placeholder, &font_kartbox_lg, 0);
     lv_obj_set_style_text_color(placeholder, COLOR_MUTED, 0);
@@ -1104,7 +1131,9 @@ static void build_laps_tab(lv_obj_t *parent)
 static void update_utc_label(void)
 {
     int16_t off = settings_get_utc_offset_min();
-    lv_label_set_text_fmt(s_utc_value_label, "UTC%+d:%02d", off / 60, abs(off % 60));
+    int a = abs((int)off);
+    /* sinal explicito: "%+d" em off/60 perdia o '-' quando a hora era 0 (-30min) */
+    lv_label_set_text_fmt(s_utc_value_label, "UTC%c%d:%02d", off < 0 ? '-' : '+', a / 60, a % 60);
 }
 
 static void update_gate_label(void)
@@ -1126,7 +1155,7 @@ static void utc_plus_cb(lv_event_t *e)
 {
     (void)e;
     int16_t v = settings_get_utc_offset_min() + 15;
-    if (v > 720) v = 720;
+    if (v > 840) v = 840; /* ate UTC+14 */
     settings_set_utc_offset_min(v);
     gps_set_utc_offset_min(v);
     update_utc_label();
@@ -1282,10 +1311,19 @@ static void keyboard_event_cb(lv_event_t *e)
         lv_obj_t *ta = lv_keyboard_get_textarea(s_keyboard);
         const char *text = lv_textarea_get_text(ta);
         if (ta == s_ble_name_ta) {
-            if (text && text[0]) settings_set_ble_name(text);
+            if (text && text[0]) {
+                settings_set_ble_name(text);
+                ble_telemetry_set_device_name(settings_get_ble_name()); /* aplica ao vivo */
+                ui_show_toast("Nome BLE salvo", 1800);
+            }
         } else if (ta == s_wifi_pass_ta) {
-            /* settings_set_wifi_password ja valida o minimo de 8 chars */
-            if (text) settings_set_wifi_password(text);
+            if (text && strlen(text) >= 8) {
+                settings_set_wifi_password(text);
+                wifi_export_set_password(settings_get_wifi_password()); /* aplica ao vivo */
+                ui_show_toast("Senha do AP salva (vale ao religar o WiFi)", 2500);
+            } else {
+                ui_show_toast("Senha do AP: minimo 8 caracteres (nao salva)", 2800);
+            }
         }
     }
     lv_obj_add_flag(s_keyboard, LV_OBJ_FLAG_HIDDEN);
@@ -1470,7 +1508,14 @@ static void scr_dim_plus_cb(lv_event_t *e)
 {
     (void)e;
     int v = (int)settings_get_screensaver_dim_s() + SCREENSAVER_DIM_STEP_S;
-    settings_set_screensaver_dim_s((uint16_t)(v > SCREENSAVER_DIM_MAX_S ? SCREENSAVER_DIM_MAX_S : v));
+    if (v > SCREENSAVER_DIM_MAX_S) v = SCREENSAVER_DIM_MAX_S;
+    settings_set_screensaver_dim_s((uint16_t)v);
+    /* "apagar" nunca pode ficar antes de "escurecer" (o estagio dim seria pulado) */
+    int off = (int)settings_get_screensaver_off_s();
+    if (off != 0 && off <= v) {
+        settings_set_screensaver_off_s((uint16_t)(v + SCREENSAVER_OFF_STEP_S));
+        update_scr_off_label();
+    }
     update_scr_dim_label();
 }
 
@@ -1479,7 +1524,7 @@ static void scr_off_minus_cb(lv_event_t *e)
     (void)e;
     /* Passo pra baixo; ao chegar no minimo, cai pra 0 = "nunca". */
     int v = (int)settings_get_screensaver_off_s() - SCREENSAVER_OFF_STEP_S;
-    if (v < SCREENSAVER_OFF_STEP_S) v = 0;
+    if (v < SCREENSAVER_OFF_STEP_S || v <= (int)settings_get_screensaver_dim_s()) v = 0; /* abaixo do dim = "nunca" */
     settings_set_screensaver_off_s((uint16_t)v);
     update_scr_off_label();
 }
@@ -1488,6 +1533,7 @@ static void scr_off_plus_cb(lv_event_t *e)
 {
     (void)e;
     int v = (int)settings_get_screensaver_off_s() + SCREENSAVER_OFF_STEP_S;
+    if (v <= (int)settings_get_screensaver_dim_s()) v = (int)settings_get_screensaver_dim_s() + SCREENSAVER_OFF_STEP_S;
     settings_set_screensaver_off_s((uint16_t)(v > SCREENSAVER_OFF_MAX_S ? SCREENSAVER_OFF_MAX_S : v));
     update_scr_off_label();
 }
@@ -1644,6 +1690,26 @@ static void pista_load_cb(lv_event_t *e)
 static void pista_save_cb(lv_event_t *e)
 {
     (void)e;
+    /* Nome vira nome de arquivo no SD (ver track_manager.c): valida aqui pra
+     * dar o motivo em vez do generico "Erro ao salvar no SD". */
+    const char *name = lv_textarea_get_text(s_pista_name_ta);
+    if (name && name[0]) {
+        size_t n = strlen(name);
+        if (n >= TRACK_NAME_MAX) {
+            ui_show_toast("Nome muito longo (max 31 caracteres)", 2500);
+            return;
+        }
+        bool bad = (strcmp(name, ".") == 0 || strcmp(name, "..") == 0 ||
+                    name[n - 1] == ' ' || name[n - 1] == '.');
+        for (size_t i = 0; i < n && !bad; i++) {
+            unsigned char ch = (unsigned char)name[i];
+            if (ch < 0x20 || strchr("/\\:*?\"<>|", ch)) bad = true;
+        }
+        if (bad) {
+            ui_show_toast("Nome invalido: nao use / \\ : * ? \" < > | nem terminar com espaco ou ponto", 3500);
+            return;
+        }
+    }
     app_event_post(APP_EVT_TRACK_SAVE, EVT_SRC_TOUCH);
 }
 
@@ -2494,7 +2560,7 @@ static void build_config_tab(lv_obj_t *parent)
     lv_obj_t *ble_note = lv_label_create(col_ble);
     lv_obj_set_style_text_font(ble_note, &font_kartbox_sm, 0);
     lv_obj_set_style_text_color(ble_note, COLOR_MUTED, 0);
-    lv_label_set_text(ble_note, "reinicie o kartbox pra aplicar o nome novo");
+    lv_label_set_text(ble_note, "o nome novo aparece no proximo anuncio (reconecte o celular)");
 
     /* Comeca na sub-aba SISTEMA - mesma escolha da tab bar principal
      * (mostra o mais "informativo pra checar rapido" primeiro). Tambem
@@ -2717,6 +2783,28 @@ void ui_screensaver_notify_activity(void)
 /* Ticks (de 100ms) por meia-fase do piscar do indicador de GPS. 3 ->
  * 300ms ligado / 300ms apagado, ~1.6Hz. */
 #define GPS_DOT_BLINK_TICKS 3
+
+/* lv_label_set_text* re-layouta e invalida o label mesmo com texto igual.
+ * O refresh roda ~10x/s com ~20 labels, a maioria sem mudar entre ticks:
+ * so toca no widget quando o texto realmente mudou. */
+static void label_set_if_changed(lv_obj_t *l, const char *txt)
+{
+    const char *cur = lv_label_get_text(l);
+    if (cur && strcmp(cur, txt) == 0) return;
+    lv_label_set_text(l, txt);
+}
+
+static void label_set_fmt_if_changed(lv_obj_t *l, const char *fmt, ...) __attribute__((format(printf, 3, 4)));
+static void label_set_fmt_if_changed(lv_obj_t *l, const char *fmt, ...)
+{
+    char buf[200];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    label_set_if_changed(l, buf);
+}
+
 static void refresh_timer_cb(lv_timer_t *t)
 {
     (void)t;
@@ -2734,8 +2822,8 @@ static void refresh_timer_cb(lv_timer_t *t)
     screensaver_tick(s.fix_valid && s.speed_kmh > SCREENSAVER_MOVE_KMH,
                      s_session_recording_active || wifi_export_is_active());
 
-    lv_label_set_text_fmt(s_lbl_speed_val, "%d", (int)(s.speed_kmh + 0.5f));
-    lv_label_set_text_fmt(s_lbl_volta_val, "%lu", (unsigned long)s.lap_number);
+    label_set_fmt_if_changed(s_lbl_speed_val, "%d", (int)(s.speed_kmh + 0.5f));
+    label_set_fmt_if_changed(s_lbl_volta_val, "%lu", (unsigned long)s.lap_number);
 
     /* Celula SETORES (ex-"VEL MAX"): splits ao vivo dos setores ATIVOS -
      * os marcados manualmente (ate 2 no uso tipico) ou os 3 automaticos.
@@ -2766,44 +2854,44 @@ static void refresh_timer_cb(lv_timer_t *t)
             if (pos >= (int)sizeof(sec_txt) - 1) break;
         }
         if (shown == 0) snprintf(sec_txt, sizeof(sec_txt), "sem setor");
-        lv_label_set_text(s_lbl_velmax_val, sec_txt);
+        label_set_if_changed(s_lbl_velmax_val, sec_txt);
     }
 
     char time_buf[16];
     format_lap_time(time_buf, sizeof(time_buf), s.lap_time_ms);
-    lv_label_set_text(s_lbl_atual_val, time_buf);
+    label_set_if_changed(s_lbl_atual_val, time_buf);
 
     /* Overlay de foco (layouts 1/2) - so atualiza quando visivel */
     if (s_race_layout == 1) {
         if (s.live_delta_valid) {
-            lv_label_set_text_fmt(s_focus_big, "%+.2f", (double)(s.live_delta_ms / 1000.0f));
+            label_set_fmt_if_changed(s_focus_big, "%+.2f", (double)(s.live_delta_ms / 1000.0f));
             lv_obj_set_style_text_color(s_focus_big,
                 s.live_delta_ms <= 0 ? COLOR_GREEN : COLOR_RED, 0);
         } else {
-            lv_label_set_text(s_focus_big, "--.--");
+            label_set_if_changed(s_focus_big, "--.--");
             lv_obj_set_style_text_color(s_focus_big, COLOR_MUTED, 0);
         }
-        lv_label_set_text_fmt(s_focus_sub, "ATUAL %s    VOLTA %lu",
+        label_set_fmt_if_changed(s_focus_sub, "ATUAL %s    VOLTA %lu",
                               time_buf, (unsigned long)s.lap_number);
     } else if (s_race_layout == 2) {
-        lv_label_set_text_fmt(s_focus_big, "%d", (int)(s.speed_kmh + 0.5f));
+        label_set_fmt_if_changed(s_focus_big, "%d", (int)(s.speed_kmh + 0.5f));
         lv_obj_set_style_text_color(s_focus_big, COLOR_TEXT, 0);
         if (s.live_delta_valid) {
-            lv_label_set_text_fmt(s_focus_sub, "km/h    DELTA %+.2f",
+            label_set_fmt_if_changed(s_focus_sub, "km/h    DELTA %+.2f",
                                   (double)(s.live_delta_ms / 1000.0f));
             lv_obj_set_style_text_color(s_focus_sub,
                 s.live_delta_ms <= 0 ? COLOR_GREEN : COLOR_RED, 0);
         } else {
-            lv_label_set_text_fmt(s_focus_sub, "km/h    ATUAL %s", time_buf);
+            label_set_fmt_if_changed(s_focus_sub, "km/h    ATUAL %s", time_buf);
             lv_obj_set_style_text_color(s_focus_sub, COLOR_MUTED, 0);
         }
     }
 
     if (s.best_lap_ms > 0) {
         format_lap_time(time_buf, sizeof(time_buf), s.best_lap_ms);
-        lv_label_set_text(s_lbl_best_val, time_buf);
+        label_set_if_changed(s_lbl_best_val, time_buf);
     } else {
-        lv_label_set_text(s_lbl_best_val, "--.---");
+        label_set_if_changed(s_lbl_best_val, "--.---");
     }
 
     /* DELTA ao vivo (tipo carro de corrida) - atualiza a cada amostra de
@@ -2814,11 +2902,11 @@ static void refresh_timer_cb(lv_timer_t *t)
      * ja reflete o inicio da volta nova a partir da primeira amostra). */
     bool has_live = s.live_delta_valid;
     if (has_live) {
-        lv_label_set_text_fmt(s_lbl_delta_val, "%+.2f", (double)(s.live_delta_ms / 1000.0f));
+        label_set_fmt_if_changed(s_lbl_delta_val, "%+.2f", (double)(s.live_delta_ms / 1000.0f));
         lv_obj_set_style_text_color(s_lbl_delta_val,
             (s.live_delta_ms <= 0) ? COLOR_GREEN : COLOR_RED, 0);
     } else {
-        lv_label_set_text(s_lbl_delta_val, "--.--");
+        label_set_if_changed(s_lbl_delta_val, "--.--");
         lv_obj_set_style_text_color(s_lbl_delta_val, COLOR_MUTED, 0);
     }
 
@@ -2830,17 +2918,18 @@ static void refresh_timer_cb(lv_timer_t *t)
         if (pred < 0) pred = 0;
         char pbuf[16];
         format_lap_time(pbuf, sizeof(pbuf), (uint32_t)pred);
-        lv_label_set_text_fmt(s_lbl_predicted, "PREV %s", pbuf);
+        label_set_fmt_if_changed(s_lbl_predicted, "PREV %s", pbuf);
         lv_obj_set_style_text_color(s_lbl_predicted,
             (s.live_delta_ms <= 0) ? COLOR_GREEN : COLOR_RED, 0);
     } else {
-        lv_label_set_text(s_lbl_predicted, "PREV --.---");
+        label_set_if_changed(s_lbl_predicted, "PREV --.---");
         lv_obj_set_style_text_color(s_lbl_predicted, COLOR_MUTED, 0);
     }
 
     int lit = 0;
     if (has_live) {
         float scale_ms = (float)settings_get_led_scale_ms();
+        if (scale_ms < 1.0f) scale_ms = 1.0f; /* NVS corrompida nao pode dividir por zero */
         lit = (int)((fabsf((float)s.live_delta_ms) / scale_ms) * DELTA_LED_PER_SIDE);
         if (lit > DELTA_LED_PER_SIDE) lit = DELTA_LED_PER_SIDE;
     }
@@ -2855,16 +2944,16 @@ static void refresh_timer_cb(lv_timer_t *t)
 
     /* Barra inferior: velocidade maxima da sessao (os splits de setor
      * agora vivem na celula SETORES; previsto e ideal tem blocos proprios). */
-    lv_label_set_text_fmt(s_lbl_velmax_strip, "MAX %d", (int)(s_max_speed_kmh + 0.5f));
+    label_set_fmt_if_changed(s_lbl_velmax_strip, "MAX %d", (int)(s_max_speed_kmh + 0.5f));
 
     /* Volta ideal - 0 = ainda sem volta "limpa" completa nessa sessao
      * (ver update_best_segments() em gps.c). */
     if (s.ideal_lap_ms > 0) {
         char ideal_buf[16];
         format_lap_time(ideal_buf, sizeof(ideal_buf), s.ideal_lap_ms);
-        lv_label_set_text_fmt(s_lbl_ideal_lap, "IDEAL: %s", ideal_buf);
+        label_set_fmt_if_changed(s_lbl_ideal_lap, "IDEAL: %s", ideal_buf);
     } else {
-        lv_label_set_text(s_lbl_ideal_lap, "IDEAL: --");
+        label_set_if_changed(s_lbl_ideal_lap, "IDEAL: --");
     }
 
     /* Indicador de GPS no topo (dot + label), 3 estados:
@@ -2880,15 +2969,15 @@ static void refresh_timer_cb(lv_timer_t *t)
     bool gps_blink_off = false;
     if (s.fix_valid) {
         gps_color = COLOR_GREEN;
-        lv_label_set_text_fmt(s_gps_label, "GPS FIX: %u", (unsigned)s.satellites);
+        label_set_fmt_if_changed(s_gps_label, "GPS FIX: %u", (unsigned)s.satellites);
     } else if (s.satellites >= 1) {
         gps_color = COLOR_GOLD;
-        lv_label_set_text_fmt(s_gps_label, "GPS %u", (unsigned)s.satellites);
+        label_set_fmt_if_changed(s_gps_label, "GPS %u", (unsigned)s.satellites);
     } else {
         gps_color = COLOR_RED;
         /* fase "apagada" a cada GPS_DOT_BLINK_TICKS ticks -> pisca ~1.6Hz */
         gps_blink_off = ((s_gps_blink / GPS_DOT_BLINK_TICKS) % 2) != 0;
-        lv_label_set_text(s_gps_label, "GPS 0");
+        label_set_if_changed(s_gps_label, "GPS 0");
     }
     lv_color_t gps_shown = gps_blink_off ? COLOR_RED_DIM : gps_color;
     lv_obj_set_style_text_color(s_gps_label, gps_shown, 0);
@@ -3119,9 +3208,14 @@ static void mode_popup_dismiss_cb(lv_timer_t *t)
     s_mode_popup_timer = NULL;
 }
 
+static lv_timer_t *s_track_loaded_timer = NULL; /* countdown pos-carregar pista (ver ui_show_track_loaded_countdown) */
+
 void ui_show_toast(const char *msg, uint32_t duration_ms)
 {
     if (!lvgl_port_lock(0)) return;
+    /* um toast novo assume a caixa: cancela o countdown "indo pra CORRIDA" em
+     * andamento (senao ele sobrescrevia o texto e escondia o toast cedo) */
+    if (s_track_loaded_timer) { lv_timer_delete(s_track_loaded_timer); s_track_loaded_timer = NULL; }
     lv_label_set_text(s_toast_label, msg);
     lv_obj_clear_flag(s_toast_box, LV_OBJ_FLAG_HIDDEN);
     if (s_toast_timer) {
@@ -3174,7 +3268,6 @@ void ui_show_session_stats(const gps_session_stats_t *stats)
  * deixar obvio que carregou E levar direto pro lugar onde se usa (aba
  * CORRIDA), sem precisar trocar de aba na mao.
  * ---------------------------------------------------------------------- */
-static lv_timer_t *s_track_loaded_timer = NULL;
 static int          s_track_loaded_countdown;
 static char          s_track_loaded_name[TRACK_NAME_MAX];
 
@@ -3371,6 +3464,8 @@ static lv_obj_t *make_center_overlay(lv_obj_t *layer, const char *title,
 
 void ui_init(lv_display_t *disp)
 {
+    if (!s_sess_mtx) s_sess_mtx = xSemaphoreCreateMutex();
+
     /* Antes de qualquer widget: carrega a paleta do tema salvo (NVS) nas
      * variaveis COLOR_PRIMARY* - todos os builds abaixo ja usam a cor
      * certa. settings_init() ja rodou no app_main() nesse ponto. */
@@ -3871,11 +3966,12 @@ void ui_set_wifi_scan_results(char ssids[][WIFI_SCAN_SSID_MAX], int count)
     size_t used = 0;
     opts[0] = '\0';
     for (int i = 0; i < count; i++) {
-        int n = snprintf(opts + used, sizeof(opts) - used, "%s%s", i > 0 ? "\n" : "", ssids[i]);
+        if (!ssids[i][0]) continue; /* rede oculta (SSID vazio) vira linha em branco no dropdown */
+        int n = snprintf(opts + used, sizeof(opts) - used, "%s%s", used > 0 ? "\n" : "", ssids[i]);
         if (n < 0 || (size_t)n >= sizeof(opts) - used) break;
         used += (size_t)n;
     }
-    lv_dropdown_set_options(s_wifi_scan_dd, opts);
+    lv_dropdown_set_options(s_wifi_scan_dd, used > 0 ? opts : "nenhuma rede encontrada");
 
     lvgl_port_unlock();
 }
@@ -3963,27 +4059,43 @@ void ui_set_ble_radio_state(bool enabled)
 
 void ui_refresh_session_list(void)
 {
-    /* Leitura do SD fica FORA do lock - I/O lento nao pode segurar a
-     * taskLVGL parada mais que o necessario. */
-    static sd_session_entry_t sessions[SD_MAX_SESSIONS_LISTED];
-    int count = sd_list_sessions(sessions, SD_MAX_SESSIONS_LISTED);
-
-    if (count == 0) {
-        if (!lvgl_port_lock(0)) return;
-        lv_dropdown_set_options(s_session_dropdown, "nenhuma sessao");
-        lvgl_port_unlock();
+    /* Leitura do SD fica FORA do lock do LVGL - I/O lento nao pode segurar a
+     * taskLVGL parada. Buffers no heap (antes eram static e esta funcao e'
+     * chamada de tasks diferentes - boot, dispatcher - sem exclusao mutua). */
+    sd_session_entry_t *sessions = malloc(sizeof(sd_session_entry_t) * SD_MAX_SESSIONS_LISTED);
+    const size_t opts_cap = (size_t)SD_MAX_SESSIONS_LISTED * (SD_SESSION_NAME_LEN + 1) + 1;
+    char *opts = malloc(opts_cap);
+    if (!sessions || !opts) {
+        free(sessions); free(opts);
         return;
     }
 
-    static char opts_buf[SD_MAX_SESSIONS_LISTED * SD_SESSION_NAME_LEN];
-    opts_buf[0] = '\0';
+    int count = sd_list_sessions(sessions, SD_MAX_SESSIONS_LISTED);
+
+    /* cache indice->nome (ver s_sess_names) */
+    if (s_sess_mtx) xSemaphoreTake(s_sess_mtx, portMAX_DELAY);
+    s_sess_count = count;
     for (int i = 0; i < count; i++) {
-        strcat(opts_buf, sessions[i].filename);
-        if (i < count - 1) strcat(opts_buf, "\n");
+        memcpy(s_sess_names[i], sessions[i].filename, SD_SESSION_NAME_LEN);
+        s_sess_names[i][SD_SESSION_NAME_LEN - 1] = '\0';
     }
-    if (!lvgl_port_lock(0)) return;
-    lv_dropdown_set_options(s_session_dropdown, opts_buf);
-    lvgl_port_unlock();
+    if (s_sess_mtx) xSemaphoreGive(s_sess_mtx);
+
+    size_t used = 0;
+    opts[0] = '\0';
+    for (int i = 0; i < count; i++) {
+        int n = snprintf(opts + used, opts_cap - used, "%s%s", i > 0 ? "\n" : "", sessions[i].filename);
+        if (n < 0 || (size_t)n >= opts_cap - used) break;
+        used += (size_t)n;
+    }
+
+    if (lvgl_port_lock(0)) {
+        /* lv_dropdown_set_options copia a string - pode liberar o buffer depois */
+        lv_dropdown_set_options(s_session_dropdown, count > 0 ? opts : "nenhuma sessao");
+        lvgl_port_unlock();
+    }
+    free(sessions);
+    free(opts);
 }
 
 /* ------------------------------------------------------------------
@@ -4273,18 +4385,22 @@ void ui_show_session_laps(uint32_t session_index)
      * levar centenas de ms num cartao lento - segurar a taskLVGL isso
      * tudo congelaria a tela). So depois, com os dados em maos, trava e
      * reconstroi os widgets. */
-    static sd_session_entry_t sessions[SD_MAX_SESSIONS_LISTED];
-    int session_count = sd_list_sessions(sessions, SD_MAX_SESSIONS_LISTED);
+    char fname[SD_SESSION_NAME_LEN] = {0};
+    bool session_valid = session_name_from_index(session_index, fname);
 
-    bool session_valid = ((int)session_index < session_count);
-
+    /* le num buffer temporario: s_laps_cache e' lido por callbacks da taskLVGL
+     * (comparacao de voltas) e so pode ser trocado com o lock em maos */
+    static sd_lap_summary_t laps_tmp[SD_MAX_LAPS_LISTED];
     int lap_count = 0;
     if (session_valid) {
-        lap_count = sd_read_session_laps(sessions[session_index].filename, s_laps_cache, SD_MAX_LAPS_LISTED);
+        lap_count = sd_read_session_laps(fname, laps_tmp, SD_MAX_LAPS_LISTED);
+        if (lap_count < 0) lap_count = 0;
+        if (lap_count > SD_MAX_LAPS_LISTED) lap_count = SD_MAX_LAPS_LISTED;
     }
-    const sd_lap_summary_t *laps = s_laps_cache;
 
     if (!lvgl_port_lock(0)) return;
+    memcpy(s_laps_cache, laps_tmp, (size_t)lap_count * sizeof(sd_lap_summary_t));
+    const sd_lap_summary_t *laps = s_laps_cache;
 
     /* lista nova = selecao de comparacao anterior nao vale mais */
     s_laps_cache_count = lap_count;
@@ -4427,27 +4543,26 @@ void ui_show_session_map(uint32_t session_index)
         return;
     }
 
-    static sd_session_entry_t sessions[SD_MAX_SESSIONS_LISTED];
-    int session_count = sd_list_sessions(sessions, SD_MAX_SESSIONS_LISTED);
-    if ((int)session_index >= session_count) {
+    char fname[SD_SESSION_NAME_LEN] = {0};
+    if (!session_name_from_index(session_index, fname)) {
         ui_show_toast("Sessao invalida", 2000);
         return;
     }
 
-    int count = sd_read_session_track(sessions[session_index].filename, s_map_pts, SD_MAX_TRACK_POINTS);
+    int count = sd_read_session_track(fname, s_map_pts, SD_MAX_TRACK_POINTS);
     if (count < 2) {
         ui_show_toast("Sem dados de posicao nessa sessao", 2500);
         return;
     }
     s_map_pt_count = count;
-    strncpy(s_map_session_name, sessions[session_index].filename, sizeof(s_map_session_name) - 1);
+    strncpy(s_map_session_name, fname, sizeof(s_map_session_name) - 1);
     s_map_session_name[sizeof(s_map_session_name) - 1] = '\0';
 
     /* Melhor volta da sessao - alimenta o botao "Ver: melhor volta".
      * Buffer proprio (nao s_laps_cache) pra nao bagunçar a lista/selecao
      * de comparacao da aba VOLTAS. */
     static sd_lap_summary_t map_laps[SD_MAX_LAPS_LISTED];
-    int map_lap_count = sd_read_session_laps(sessions[session_index].filename, map_laps, SD_MAX_LAPS_LISTED);
+    int map_lap_count = sd_read_session_laps(fname, map_laps, SD_MAX_LAPS_LISTED);
     s_map_have_best = false;
     s_map_best_lap  = 0;
     uint32_t best_ms = UINT32_MAX;

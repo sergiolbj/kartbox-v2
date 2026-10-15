@@ -36,6 +36,22 @@ static int  s_count = 0;
 /* ------------------------------------------------------------------
  * Helpers
  * ------------------------------------------------------------------ */
+/* Nome vira nome de arquivo: recusa vazio, sem NUL dentro de TRACK_NAME_MAX,
+ * separadores de caminho, "." / ".." e caracteres invalidos em FAT. */
+static bool name_valid(const char *name)
+{
+    if (!name) return false;
+    size_t n = strnlen(name, TRACK_NAME_MAX);
+    if (n == 0 || n >= TRACK_NAME_MAX) return false;
+    if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) return false;
+    for (size_t i = 0; i < n; i++) {
+        unsigned char c = (unsigned char)name[i];
+        if (c < 0x20 || strchr("/\\:*?\"<>|", c)) return false;
+    }
+    if (name[n - 1] == ' ' || name[n - 1] == '.') return false; /* FAT remove */
+    return true;
+}
+
 static void build_path(char *buf, size_t len, const char *name)
 {
     snprintf(buf, len, "%s/%s.trk", SD_TRACKS_DIR, name);
@@ -82,8 +98,8 @@ void track_manager_init(void)
 
 bool track_manager_save(const track_config_t *cfg)
 {
-    if (!cfg || cfg->name[0] == '\0') {
-        ESP_LOGW(TAG, "save: nome de pista vazio - ignorado");
+    if (!cfg || !name_valid(cfg->name)) {
+        ESP_LOGW(TAG, "save: nome de pista vazio/invalido - ignorado");
         return false;
     }
     char path[128];
@@ -112,7 +128,7 @@ bool track_manager_save(const track_config_t *cfg)
 
 bool track_manager_load(const char *name, track_config_t *out)
 {
-    if (!name || !out) return false;
+    if (!out || !name_valid(name)) return false;
     char path[128];
     build_path(path, sizeof(path), name);
 
@@ -141,7 +157,7 @@ bool track_manager_load(const char *name, track_config_t *out)
 
 bool track_manager_delete(const char *name)
 {
-    if (!name) return false;
+    if (!name_valid(name)) return false;
     char path[128];
     build_path(path, sizeof(path), name);
 

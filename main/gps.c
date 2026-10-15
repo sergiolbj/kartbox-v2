@@ -362,6 +362,8 @@ static bool check_gate_cross(double gate_lat, double gate_lon, float gate_headin
                               int64_t cur_us, int64_t *out_us)
 {
     if (!s_prev_valid) return false;
+    /* lacuna >1.5s (perda de fix/atraso) -> a "reta" prev->cur nao representa o trajeto: evita falso cruzamento */
+    if (cur_us - s_prev_us > 1500000) return false;
 
     float d_prev = signed_gate_dist(s_prev_lat, s_prev_lon, gate_lat, gate_lon, gate_heading);
     float d_cur  = signed_gate_dist(s_state.lat, s_state.lon, gate_lat, gate_lon, gate_heading);
@@ -1113,6 +1115,17 @@ void gps_load_finish_line(double lat, double lon, float heading_deg)
     xSemaphoreGive(s_state_mutex);
     ESP_LOGI(TAG, "Linha de chegada restaurada (%.6f, %.6f) heading=%.1f",
              lat, lon, (double)heading_deg);
+}
+
+void gps_clear_finish_line(void)
+{
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    s_finish_line_set      = false;
+    s_waiting_for_movement = false;
+    s_best_trace_count     = 0;      /* melhor volta era contra o gate antigo */
+    lap_trace_reset_current();
+    xSemaphoreGive(s_state_mutex);
+    ESP_LOGI(TAG, "Linha de chegada removida");
 }
 
 bool gps_get_finish_line(double *lat, double *lon, float *heading_deg)

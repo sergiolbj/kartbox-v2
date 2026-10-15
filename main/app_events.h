@@ -72,6 +72,10 @@ typedef enum {
      * nunca na taskLVGL. */
     APP_EVT_CFG_BACKUP,
     APP_EVT_CFG_RESTORE,
+
+    /* Botao "atualizar" da aba VOLTAS: reler a lista de sessoes do SD. O I/O
+     * roda no dispatcher (main), nunca dentro do callback da taskLVGL. */
+    APP_EVT_SESSION_REFRESH,
 } app_event_type_t;
 
 typedef enum {

@@ -18,6 +18,7 @@
 #include "esp_ldo_regulator.h"
 #include "driver/gpio.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 
@@ -26,6 +27,7 @@ static const char *TAG = "sd_logger";
 static QueueHandle_t    s_log_queue;
 static sdmmc_card_t    *s_card = NULL;
 static FILE             *s_session_file = NULL;
+static SemaphoreHandle_t s_file_mtx = NULL; /* protege s_session_file entre task de log e start/stop */
 static volatile bool     s_recording = false;
 static int64_t           s_session_start_us = 0;
 static esp_ldo_channel_handle_t s_sd_ldo = NULL;
@@ -168,9 +170,12 @@ static void sd_logger_task(void *arg)
 
     for (;;) {
         if (xQueueReceive(s_log_queue, &entry, portMAX_DELAY) != pdTRUE) continue;
-        if (!s_recording || !s_session_file) continue;
+        if (!s_file_mtx) continue;
+        xSemaphoreTake(s_file_mtx, portMAX_DELAY);
+        if (!s_recording || !s_session_file) { xSemaphoreGive(s_file_mtx); continue; }
 
-        uint32_t t_ms = (uint32_t)((entry.timestamp_us - s_session_start_us) / 1000);
+        int64_t dt_us = entry.timestamp_us - s_session_start_us;
+        uint32_t t_ms = dt_us > 0 ? (uint32_t)(dt_us / 1000) : 0; /* amostra antiga da fila anterior a sessao nao vira ~4e9 */
         /* s1_ms/s2_ms: splits cumulativos da volta em andamento (0 = setor
          * ainda nao cruzado). O leitor pega os da ULTIMA linha de cada
          * volta = splits finais dela. Formato assume GPS_MAX_SECTORS==2 -
@@ -196,6 +201,7 @@ static void sd_logger_task(void *arg)
             fflush(s_session_file);
             since_flush = 0;
         }
+        xSemaphoreGive(s_file_mtx);
     }
 }
 
@@ -280,8 +286,13 @@ bool sd_logger_start_session(const char *track_name)
                  SD_SESSIONS_DIR, (long long)(esp_timer_get_time() / 1000000), tsuf);
     }
 
+    if (!s_file_mtx) s_file_mtx = xSemaphoreCreateMutex();
+    if (!s_file_mtx) return false;
+    xSemaphoreTake(s_file_mtx, portMAX_DELAY);
+    if (s_session_file) { fclose(s_session_file); s_session_file = NULL; } /* nao vaza FILE* se start 2x */
     s_session_file = fopen(path, "w");
     if (!s_session_file) {
+        xSemaphoreGive(s_file_mtx);
         ESP_LOGE(TAG, "Falha ao criar %s", path);
         return false;
     }
@@ -289,6 +300,7 @@ bool sd_logger_start_session(const char *track_name)
     fprintf(s_session_file, "t_ms,lat,lon,speed_kmh,heading_deg,sats,lap,lap_time_ms,best_lap_ms,delta_ms,s1_ms,s2_ms\n");
     s_session_start_us = esp_timer_get_time();
     s_recording = true;
+    xSemaphoreGive(s_file_mtx);
 
     ESP_LOGI(TAG, "Sessao iniciada: %s", path);
     return true;
@@ -297,12 +309,15 @@ bool sd_logger_start_session(const char *track_name)
 void sd_logger_stop_session(void)
 {
     s_recording = false;
+    if (!s_file_mtx) return;
+    xSemaphoreTake(s_file_mtx, portMAX_DELAY);
     if (s_session_file) {
         fflush(s_session_file);
         fclose(s_session_file);
         s_session_file = NULL;
         ESP_LOGI(TAG, "Sessao encerrada e salva");
     }
+    xSemaphoreGive(s_file_mtx);
 }
 
 bool sd_logger_is_recording(void)
@@ -355,12 +370,26 @@ int sd_list_sessions(sd_session_entry_t *out, int max_entries)
 
     int count = 0;
     struct dirent *de;
-    while ((de = readdir(dir)) != NULL && count < max_entries) {
+    if (max_entries <= 0) { closedir(dir); return 0; }
+    /* varre TODOS os arquivos; com a lista cheia, so entra quem for mais novo
+     * que o mais antigo ja guardado (readdir do FAT nao vem ordenado) */
+    while ((de = readdir(dir)) != NULL) {
         size_t len = strlen(de->d_name);
         if (len < 5 || strcmp(de->d_name + len - 4, ".csv") != 0) continue;
-        strncpy(out[count].filename, de->d_name, SD_SESSION_NAME_LEN - 1);
-        out[count].filename[SD_SESSION_NAME_LEN - 1] = '\0';
-        count++;
+        char name[SD_SESSION_NAME_LEN];
+        strncpy(name, de->d_name, SD_SESSION_NAME_LEN - 1);
+        name[SD_SESSION_NAME_LEN - 1] = '\0';
+        int slot = count;
+        if (count >= max_entries) {
+            int oldest = 0;
+            for (int i = 1; i < count; i++)
+                if (strcmp(out[i].filename, out[oldest].filename) < 0) oldest = i;
+            if (strcmp(name, out[oldest].filename) <= 0) continue;
+            slot = oldest;
+        } else {
+            count++;
+        }
+        memcpy(out[slot].filename, name, SD_SESSION_NAME_LEN);
     }
     closedir(dir);
 

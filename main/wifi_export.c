@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <dirent.h>
+#include <ctype.h>
 #include "esp_wifi.h"
 #include "esp_netif.h"
 #include "esp_event.h"
@@ -101,6 +102,83 @@ static volatile bool      s_scanning = false;
 static void touch_activity(void)
 {
     s_last_activity_us = esp_timer_get_time();
+}
+
+/* ---------------------------------------------------------------------
+ * Helpers de entrada/saida web
+ * --------------------------------------------------------------------- */
+
+/* Decodifica %XX e '+' in-place (query string). */
+static void url_decode_inplace(char *s)
+{
+    char *w = s;
+    for (const char *r = s; *r; r++) {
+        if (*r == '%' && isxdigit((unsigned char)r[1]) && isxdigit((unsigned char)r[2])) {
+            char h[3] = { r[1], r[2], 0 };
+            *w++ = (char)strtol(h, NULL, 16);
+            r += 2;
+        } else if (*r == '+') {
+            *w++ = ' ';
+        } else {
+            *w++ = *r;
+        }
+    }
+    *w = '\0';
+}
+
+/* httpd_query_key_value + URL-decode (a lib devolve o valor cru: "a%20b"). */
+static esp_err_t query_param(const char *query, const char *key, char *out, size_t len)
+{
+    esp_err_t e = httpd_query_key_value(query, key, out, len);
+    if (e == ESP_OK) url_decode_inplace(out);
+    return e;
+}
+
+/* Nome de arquivo de sessao/upload aceitavel: sem separador de caminho,
+ * sem "..", sem aspas e sem controle (CR/LF viraria injecao de header no
+ * Content-Disposition depois do decode). */
+static bool web_filename_ok(const char *n)
+{
+    if (!n || !n[0] || strstr(n, "..")) return false;
+    for (const unsigned char *p = (const unsigned char *)n; *p; p++) {
+        if (*p < 0x20 || *p == 0x7F || *p == '/' || *p == '\\' || *p == '"') return false;
+    }
+    return true;
+}
+
+/* Envia texto com escape HTML (texto e atributos entre aspas). */
+static void send_html_esc(httpd_req_t *req, const char *s)
+{
+    char buf[96]; size_t n = 0;
+    for (; *s; s++) {
+        const char *rep = NULL;
+        switch (*s) {
+        case '&': rep = "&amp;"; break;
+        case '<': rep = "&lt;"; break;
+        case '>': rep = "&gt;"; break;
+        case '"': rep = "&quot;"; break;
+        case '\'': rep = "&#39;"; break;
+        }
+        size_t add = rep ? strlen(rep) : 1;
+        if (n + add >= sizeof(buf)) { buf[n] = 0; httpd_resp_sendstr_chunk(req, buf); n = 0; }
+        if (rep) { memcpy(buf + n, rep, add); n += add; } else buf[n++] = *s;
+    }
+    if (n) { buf[n] = 0; httpd_resp_sendstr_chunk(req, buf); }
+}
+
+/* Envia texto percent-encoded (pra href/query). */
+static void send_url_enc(httpd_req_t *req, const char *s)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    char buf[96]; size_t n = 0;
+    for (const unsigned char *p = (const unsigned char *)s; *p; p++) {
+        bool safe = isalnum(*p) || *p == '-' || *p == '_' || *p == '.' || *p == '~';
+        size_t add = safe ? 1 : 3;
+        if (n + add >= sizeof(buf)) { buf[n] = 0; httpd_resp_sendstr_chunk(req, buf); n = 0; }
+        if (safe) buf[n++] = (char)*p;
+        else { buf[n++] = '%'; buf[n++] = hex[*p >> 4]; buf[n++] = hex[*p & 15]; }
+    }
+    if (n) { buf[n] = 0; httpd_resp_sendstr_chunk(req, buf); }
 }
 
 /* ---------------------------------------------------------------------
@@ -198,25 +276,27 @@ static esp_err_t index_get_handler(httpd_req_t *req)
              * do arquivo entra 5x - mandado em pedacos (sendstr_chunk) em
              * vez de um snprintf num buffer fixo, pra nao arriscar
              * truncamento (nome de sessao pode ter qualquer tamanho). */
+            /* Nome do arquivo vem do SD (pode ter aspas, <, ' ...): texto/atributo
+             * com escape HTML; href com percent-encode; botoes leem o nome de
+             * data-f (nunca interpolado dentro de string JS). */
             httpd_resp_sendstr_chunk(req, "<li><b>");
-            httpd_resp_sendstr_chunk(req, de->d_name);
+            send_html_esc(req, de->d_name);
             /* <small> com data-file: preenchido no navegador (kbMeta) com a
              * data legivel e a pista, derivadas do nome do arquivo. */
             httpd_resp_sendstr_chunk(req, "</b><small class=\"meta\" data-file=\"");
-            httpd_resp_sendstr_chunk(req, de->d_name);
+            send_html_esc(req, de->d_name);
             httpd_resp_sendstr_chunk(req, "\"></small> <a href=\"/download?file=");
-            httpd_resp_sendstr_chunk(req, de->d_name);
-            httpd_resp_sendstr_chunk(req, "\">CSV</a> <button onclick=\"kbExp('");
-            httpd_resp_sendstr_chunk(req, de->d_name);
-            httpd_resp_sendstr_chunk(req, "','gpx')\">GPX</button> <button onclick=\"kbExp('");
-            httpd_resp_sendstr_chunk(req, de->d_name);
-            httpd_resp_sendstr_chunk(req, "','vbo')\">VBO</button> <button onclick=\"kbExp('");
-            httpd_resp_sendstr_chunk(req, de->d_name);
-            httpd_resp_sendstr_chunk(req, "','rc')\">RaceChrono</button> <a href=\"/analise?file=");
-            httpd_resp_sendstr_chunk(req, de->d_name);
-            httpd_resp_sendstr_chunk(req, "\">Analise</a> <button class=\"del\" onclick=\"kbDel('");
-            httpd_resp_sendstr_chunk(req, de->d_name);
-            httpd_resp_sendstr_chunk(req, "')\">Excluir</button></li>");
+            send_url_enc(req, de->d_name);
+            httpd_resp_sendstr_chunk(req, "\">CSV</a> <span data-f=\"");
+            send_html_esc(req, de->d_name);
+            httpd_resp_sendstr_chunk(req,
+                "\"><button onclick=\"kbExp(this.parentNode.dataset.f,'gpx')\">GPX</button> "
+                "<button onclick=\"kbExp(this.parentNode.dataset.f,'vbo')\">VBO</button> "
+                "<button onclick=\"kbExp(this.parentNode.dataset.f,'rc')\">RaceChrono</button> "
+                "<a href=\"/analise?file=");
+            send_url_enc(req, de->d_name);
+            httpd_resp_sendstr_chunk(req,
+                "\">Analise</a> <button class=\"del\" onclick=\"kbDel(this.parentNode.dataset.f)\">Excluir</button></span></li>");
         }
         closedir(dir);
     }
@@ -342,14 +422,13 @@ static esp_err_t download_get_handler(httpd_req_t *req)
     char query[160];
     char filename[64] = {0};
     if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
-        httpd_query_key_value(query, "file", filename, sizeof(filename));
+        query_param(query, "file", filename, sizeof(filename));
     }
 
     /* SO o nome do arquivo. Rejeita qualquer coisa que tente sair da
-     * pasta de sessoes. */
-    const char *base = strrchr(filename, '/');
-    base = base ? base + 1 : filename;
-    if (base[0] == '\0' || strstr(base, "..") != NULL) {
+     * pasta de sessoes (ou injetar header via CR/LF/aspas). */
+    const char *base = filename;
+    if (!web_filename_ok(base)) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "nome de arquivo invalido");
         return ESP_FAIL;
     }
@@ -399,11 +478,10 @@ static esp_err_t upload_post_handler(httpd_req_t *req)
     char query[160];
     char filename[64] = {0};
     if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
-        httpd_query_key_value(query, "file", filename, sizeof(filename));
+        query_param(query, "file", filename, sizeof(filename));
     }
-    const char *base = strrchr(filename, '/');
-    base = base ? base + 1 : filename;
-    if (base[0] == '\0' || strstr(base, "..") != NULL) {
+    const char *base = filename;
+    if (!web_filename_ok(base)) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "nome de arquivo invalido");
         return ESP_FAIL;
     }
@@ -444,10 +522,21 @@ static esp_err_t upload_post_handler(httpd_req_t *req)
             httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "falha ao receber corpo");
             return ESP_FAIL;
         }
-        fwrite(buf, 1, r, f);
+        if (fwrite(buf, 1, (size_t)r, f) != (size_t)r) {
+            fclose(f);
+            remove(path); /* cartao cheio/erro de escrita - nao deixa arquivo truncado */
+            ESP_LOGE(TAG, "upload: falha de escrita em %s (SD cheio?)", path);
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "falha ao gravar no SD (cheio?)");
+            return ESP_FAIL;
+        }
         remaining -= r;
     }
-    fclose(f);
+    if (fclose(f) != 0) {
+        remove(path);
+        ESP_LOGE(TAG, "upload: fclose falhou em %s", path);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "falha ao finalizar arquivo no SD");
+        return ESP_FAIL;
+    }
 
     ESP_LOGI(TAG, "Upload recebido: %s (%d bytes)", path, (int)req->content_len);
     /* resposta diz ONDE salvou - a pagina mostra esse texto */
@@ -883,9 +972,9 @@ static esp_err_t api_laps_handler(httpd_req_t *req)
 
     char query[160], fname[64] = {0};
     if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
-        httpd_query_key_value(query, "file", fname, sizeof(fname));
+        query_param(query, "file", fname, sizeof(fname));
     }
-    if (!fname[0] || strstr(fname, "..")) {
+    if (!web_filename_ok(fname)) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "file invalido");
         return ESP_FAIL;
     }
@@ -979,7 +1068,7 @@ static esp_err_t evolution_get_handler(httpd_req_t *req)
         "var sd=Math.sqrt(clean.reduce(function(a,b){return a+(b-m)*(b-m);},0)/clean.length);\n"
         "return {label:s.label,laps:times.length,best:best,mean:m,sd:sd};\n"
         "});\n"
-        ")).then(function(rows){\n"
+        "})).then(function(rows){\n"
         "rows=rows.filter(function(r){return r;});\n"
         "cnt.textContent=rows.length+' sessoes com voltas';\n"
         "if(!rows.length){err.textContent='nenhuma volta fechada nessa pista';return;}\n"
@@ -1260,7 +1349,7 @@ static esp_err_t track_get_handler(httpd_req_t *req)
 
     char query[96], name[TRACK_NAME_MAX] = {0};
     if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
-        httpd_query_key_value(query, "name", name, sizeof(name));
+        query_param(query, "name", name, sizeof(name));
     }
     if (name[0] == '\0') {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "faltou ?name=");
@@ -1323,7 +1412,7 @@ static esp_err_t track_delete_handler(httpd_req_t *req)
 
     char query[96], name[TRACK_NAME_MAX] = {0};
     if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
-        httpd_query_key_value(query, "name", name, sizeof(name));
+        query_param(query, "name", name, sizeof(name));
     }
     if (name[0] == '\0' || !track_manager_delete(name)) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "nao foi possivel apagar");
@@ -1356,13 +1445,12 @@ static esp_err_t delete_session_post_handler(httpd_req_t *req)
     char query[160];
     char filename[64] = {0};
     if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
-        httpd_query_key_value(query, "file", filename, sizeof(filename));
+        query_param(query, "file", filename, sizeof(filename));
     }
 
-    const char *base = strrchr(filename, '/');
-    base = base ? base + 1 : filename;
+    const char *base = filename;
     size_t blen = strlen(base);
-    if (base[0] == '\0' || strstr(base, "..") != NULL ||
+    if (!web_filename_ok(base) ||
         blen < 5 || strcmp(base + blen - 4, ".csv") != 0) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "nome de arquivo invalido");
         return ESP_FAIL;
@@ -1386,6 +1474,7 @@ static esp_err_t start_http_server(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.lru_purge_enable = true;
     config.max_uri_handlers = 20; /* default (8) nao sobra pra APIs + OTA + A-GPS + analise + evolucao */
+    config.stack_size = 8192; /* handlers com snprintf/JSON/fopen estouram os 4096 default */
 
     esp_err_t err = httpd_start(&s_httpd, &config);
     if (err != ESP_OK) {

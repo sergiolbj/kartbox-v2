@@ -330,7 +330,7 @@ const pending = new Map();
 
 /* Histórico de voltas da sessão atual */
 let lapHistory = [];
-let _prevLapNum = 0;
+let _prevLapNum = null; /* null = ainda sem pacote (evita falso positivo ao conectar no meio da sessao) */
 let _prevBestMs = 0;
 let _lapMaxSpd  = 0;   /* pico de velocidade na volta atual */
 let _frozenDelta = null; /* delta da última volta concluída (null = sem referência) */
@@ -352,6 +352,7 @@ function status(msg, dur) {
   clearTimeout(el._t);
   el._t = setTimeout(()=>el.style.display='none', dur||2500);
 }
+function esc(t){return String(t).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function nextSeq() { s_seq = (s_seq+1) & 0xFF; return s_seq; }
 
 /* ── Protocolo BLE cmd/rsp ───────────────────────────────────────────── */
@@ -361,7 +362,19 @@ function sendCmd(cmd, payload) {
   return new Promise((resolve, reject) => {
     const seq = nextSeq();
     const chunks = [];
-    pending.set(seq, { cmd, resolve, reject, chunks });
+    const ent = { cmd, resolve, reject, chunks, timer: null };
+    const arm = () => {
+      clearTimeout(ent.timer);
+      ent.timer = setTimeout(() => {
+        if (pending.get(seq) === ent) {
+          pending.delete(seq);
+          reject(new Error('timeout cmd=0x'+cmd.toString(16)));
+        }
+      }, 8000);
+    };
+    ent.arm = arm;
+    pending.set(seq, ent);
+    arm();
 
     const plen = payload ? payload.length : 0;
     const buf = new Uint8Array(2 + plen);
@@ -369,31 +382,27 @@ function sendCmd(cmd, payload) {
     if (plen > 0) buf.set(payload, 2);
 
     chrCmd.writeValueWithoutResponse(buf).catch(e => {
+      clearTimeout(ent.timer);
       pending.delete(seq);
       reject(e);
     });
-
-    /* timeout de 8s */
-    setTimeout(() => {
-      if (pending.has(seq)) {
-        pending.delete(seq);
-        reject(new Error('timeout cmd=0x'+cmd.toString(16)));
-      }
-    }, 8000);
   });
 }
 
 /** Chamado ao receber notify de RSP */
 function onRsp(event) {
-  const v = new DataView(event.target.value.buffer);
+  const dv = event.target.value;
+  const v = new DataView(dv.buffer, dv.byteOffset, dv.byteLength);
   if (v.byteLength < 3) return;
   const cmd    = v.getUint8(0);
   const seq    = v.getUint8(1);
   const status = v.getUint8(2);
-  const data   = new Uint8Array(event.target.value.buffer, 3);
+  const data   = new Uint8Array(dv.buffer, dv.byteOffset + 3, dv.byteLength - 3);
 
   const p = pending.get(seq);
   if (!p) return;
+  clearTimeout(p.timer);
+  if (status === RSP.MORE && p.arm) p.arm(); /* reinicia timeout a cada chunk */
 
   if (status === RSP.ERR) {
     pending.delete(seq);
@@ -544,7 +553,7 @@ function updateTelem(p) {
   if (p.speed > _lapMaxSpd) _lapMaxSpd = p.speed;
 
   /* Detecta conclusão de volta (lap_num cresceu) */
-  if (p.lap_num > _prevLapNum && _prevLapNum > 0) {
+  if (_prevLapNum !== null && p.lap_num > _prevLapNum) {
     /* Calcula delta correto:
        O firmware faz delta = last - best APÓS atualizar best, então:
        - novo recorde: delta_ms==0, best_ms caiu → delta real = new_best - old_best (negativo)
@@ -559,7 +568,7 @@ function updateTelem(p) {
     _frozenDelta = lapDelta;
 
     const lap_time_ms = lapDelta <= 0 ? p.best_ms : p.best_ms + lapDelta;
-    lapHistory.push({ n:_prevLapNum, ms:lap_time_ms, delta:lapDelta, vmax:Math.round(_lapMaxSpd) });
+    lapHistory.push({ n:p.lap_num, ms:lap_time_ms, delta:lapDelta, vmax:Math.round(_lapMaxSpd) });
     _lapMaxSpd = 0;
     renderLapHist();
   }
@@ -710,7 +719,7 @@ async function doConnect() {
   btn.disabled = true; btn.textContent = 'aguardando...';
   try {
     dev = await navigator.bluetooth.requestDevice({
-      filters: [{ name: 'KartBox' }],
+      filters: [{ services: [SVC_UUID] }],
       optionalServices: [SVC_UUID]
     });
     dev.addEventListener('gattserverdisconnected', onDisconn);
@@ -778,7 +787,7 @@ function showMain() {
 
 function onDisconn() {
   setBle(false);
-  lapHistory=[]; _prevLapNum=0; _prevBestMs=0; _lapMaxSpd=0; _frozenDelta=null;
+  lapHistory=[]; _prevLapNum=null; _prevBestMs=0; _lapMaxSpd=0; _frozenDelta=null;
   renderLapHist();
   document.getElementById('conn-screen').style.display = 'flex';
   document.getElementById('pin-screen').style.display  = 'none';
@@ -842,9 +851,9 @@ async function trackLoad() {
     }
     list.innerHTML = names.map(n => `
       <div class="list-item">
-        <div><div class="list-name">${n}</div></div>
-        <button class="ibtn g" onclick="trkEdit('${n}')">editar</button>
-        <button class="ibtn r" onclick="trkDel('${n}')">excluir</button>
+        <div><div class="list-name">${esc(n)}</div></div>
+        <button class="ibtn g" onclick="trkEdit(decodeURIComponent('${encodeURIComponent(n).replace(/'/g,'%27')}'))">editar</button>
+        <button class="ibtn r" onclick="trkDel(decodeURIComponent('${encodeURIComponent(n).replace(/'/g,'%27')}'))">excluir</button>
       </div>`).join('');
     status(`${names.length} pista(s) carregada(s)`);
   } catch(e) { status('Erro: '+e.message); }
@@ -947,8 +956,8 @@ async function sessLoad() {
     }
     list.innerHTML = names.map(n => `
       <div class="list-item">
-        <div><div class="list-name" style="font-size:11px">${n}</div></div>
-        <button class="ibtn g" onclick="sessDownload('${n}')">baixar</button>
+        <div><div class="list-name" style="font-size:11px">${esc(n)}</div></div>
+        <button class="ibtn g" onclick="sessDownload(decodeURIComponent('${encodeURIComponent(n).replace(/'/g,'%27')}'))">baixar</button>
       </div>`).join('');
     status(`${names.length} sessão(ões) encontrada(s)`);
   } catch(e) { status('Erro: '+e.message); }

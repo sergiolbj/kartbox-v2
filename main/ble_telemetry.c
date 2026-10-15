@@ -8,6 +8,8 @@
 #include "settings.h"
 #include "track_manager.h"
 #include "sd_logger.h"
+#include "wifi_export.h"
+#include <math.h>
 
 #include <string.h>
 #include <stdio.h>
@@ -111,7 +113,7 @@ static void handle_get_settings(uint8_t seq)
     };
     strncpy(p.ble_name,  settings_get_ble_name(),      sizeof(p.ble_name)  - 1);
     strncpy(p.wifi_pass, settings_get_wifi_password(), sizeof(p.wifi_pass) - 1);
-    strncpy(p.ble_pin,   settings_get_ble_pin(),       sizeof(p.ble_pin)   - 1);
+    memcpy(p.ble_pin, settings_get_ble_pin(), strnlen(settings_get_ble_pin(), sizeof(p.ble_pin))); /* 8 chars, sem NUL */
     send_rsp(BLE_CMD_GET_SETTINGS, seq, BLE_RSP_OK, &p, sizeof(p));
 }
 
@@ -121,16 +123,35 @@ static void handle_set_settings(uint8_t seq, const uint8_t *payload, uint16_t le
         send_rsp(BLE_CMD_SET_SETTINGS, seq, BLE_RSP_ERR, "payload curto", 13);
         return;
     }
-    const ble_settings_payload_t *p = (const ble_settings_payload_t *)payload;
-    settings_set_utc_offset_min(p->utc_offset_min);
-    settings_set_gate_radius_m(p->gate_radius_m);
-    settings_set_min_lap_time_ms(p->min_lap_ms);
-    if (p->ble_name[0])  settings_set_ble_name(p->ble_name);
-    if (p->wifi_pass[0]) settings_set_wifi_password(p->wifi_pass);
-    /* ble_pin pode ser limpo (string vazia = desativa PIN) */
-    settings_set_ble_pin(p->ble_pin);
-    /* nova sessao precisa re-autenticar com o novo PIN */
-    s_authed = false;
+    ble_settings_payload_t p;
+    memcpy(&p, payload, sizeof(p));
+    /* strings vem sem garantia de NUL */
+    char name[sizeof(p.ble_name) + 1], pass[sizeof(p.wifi_pass) + 1], pin[sizeof(p.ble_pin) + 1];
+    memcpy(name, p.ble_name, sizeof(p.ble_name));   name[sizeof(p.ble_name)] = 0;
+    memcpy(pass, p.wifi_pass, sizeof(p.wifi_pass)); pass[sizeof(p.wifi_pass)] = 0;
+    memcpy(pin, p.ble_pin, sizeof(p.ble_pin));      pin[sizeof(p.ble_pin)] = 0;
+
+    if (!isfinite(p.gate_radius_m)) p.gate_radius_m = 10.0f;
+    if (p.gate_radius_m < 3.0f)  p.gate_radius_m = 3.0f;
+    if (p.gate_radius_m > 30.0f) p.gate_radius_m = 30.0f;
+    if (p.min_lap_ms < 5000)     p.min_lap_ms = 5000;
+    if (p.utc_offset_min < -720 || p.utc_offset_min > 840) p.utc_offset_min = 0;
+
+    settings_set_utc_offset_min(p.utc_offset_min);
+    settings_set_gate_radius_m(p.gate_radius_m);
+    settings_set_min_lap_time_ms(p.min_lap_ms);
+    /* aplica em runtime (antes so valia apos reboot) */
+    gps_set_utc_offset_min(p.utc_offset_min);
+    gps_set_gate_radius_m(p.gate_radius_m);
+    gps_set_min_lap_time_ms(p.min_lap_ms);
+    if (name[0]) { settings_set_ble_name(name); ble_telemetry_set_device_name(name); }
+    if (pass[0]) {
+        if (strlen(pass) >= 8) { settings_set_wifi_password(pass); wifi_export_set_password(pass); }
+        else ESP_LOGW(TAG, "wifi_pass <8 chars ignorada (WPA2)");
+    }
+    /* ble_pin pode ser limpo (string vazia = desativa PIN). Sessao atual
+     * continua autenticada; novo PIN vale na proxima conexao. */
+    settings_set_ble_pin(pin);
     send_rsp(BLE_CMD_SET_SETTINGS, seq, BLE_RSP_OK, NULL, 0);
     ESP_LOGI(TAG, "Settings atualizados via BLE");
 }
@@ -283,6 +304,15 @@ static void handle_list_sessions(uint8_t seq)
     send_rsp_chunked(BLE_CMD_LIST_SESSIONS, seq, (uint8_t *)buf, pos);
 }
 
+/* payload util por notify: MTU atual - 3 (ATT) - 3 (hdr RSP) */
+static size_t ble_chunk_max(void)
+{
+    uint16_t mtu = (s_conn_handle != BLE_HS_CONN_HANDLE_NONE) ? ble_att_mtu(s_conn_handle) : 23;
+    if (mtu < 23) mtu = 23;
+    size_t c = (size_t)mtu - 6;
+    return c > BLE_CHUNK_SIZE ? BLE_CHUNK_SIZE : c;
+}
+
 static void handle_get_session(uint8_t seq, const uint8_t *payload, uint16_t len)
 {
     if (len == 0) {
@@ -307,9 +337,13 @@ static void handle_get_session(uint8_t seq, const uint8_t *payload, uint16_t len
     static uint8_t chunk[BLE_CHUNK_SIZE];
     bool first = true;
     size_t n;
+    size_t csz = ble_chunk_max();
 
-    while ((n = fread(chunk, 1, sizeof(chunk), f)) > 0) {
-        bool more = !feof(f);
+    while ((n = fread(chunk, 1, csz, f)) > 0) {
+        /* lookahead: feof so vira true apos tentar ler alem do fim */
+        int nx = fgetc(f);
+        bool more = (nx != EOF);
+        if (more) ungetc(nx, f);
         uint8_t status = more ? BLE_RSP_MORE : BLE_RSP_OK;
 
         if (first) {
@@ -390,7 +424,6 @@ static void dispatch_cmd(const ble_cmd_item_t *item)
     default:
         ESP_LOGW(TAG, "Comando desconhecido: 0x%02X", item->cmd);
         {
-            uint8_t hdr[3] = { item->cmd, item->seq, BLE_RSP_ERR };
             send_rsp(item->cmd, item->seq, BLE_RSP_ERR, "cmd desconhecido", 16);
         }
         break;
@@ -434,7 +467,8 @@ static void send_rsp_chunked(uint8_t cmd, uint8_t seq,
     uint32_t offset = 0;
     while (offset < data_len) {
         uint32_t remain = data_len - offset;
-        uint16_t chunk  = remain > BLE_CHUNK_SIZE ? BLE_CHUNK_SIZE : (uint16_t)remain;
+        uint32_t cmax   = (uint32_t)ble_chunk_max();
+        uint16_t chunk  = remain > cmax ? (uint16_t)cmax : (uint16_t)remain;
         bool     more   = (offset + chunk) < data_len;
 
         send_rsp(cmd, seq, more ? BLE_RSP_MORE : BLE_RSP_OK,
@@ -619,15 +653,20 @@ static void start_advertising(void)
 {
     struct ble_hs_adv_fields fields = {0};
     fields.flags              = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
-    fields.name               = (const uint8_t *)s_device_name;
-    fields.name_len           = strlen(s_device_name);
-    fields.name_is_complete   = 1;
     fields.uuids128           = (ble_uuid128_t *)&s_svc_uuid;
     fields.num_uuids128       = 1;
     fields.uuids128_is_complete = 1;
 
     int rc = ble_gap_adv_set_fields(&fields);
     if (rc != 0) { ESP_LOGE(TAG, "adv_set_fields falhou (rc=%d)", rc); return; }
+
+    /* nome no scan response: UUID128 (18B) + flags (3B) + nome estoura 31B do adv */
+    struct ble_hs_adv_fields rsp_fields = {0};
+    rsp_fields.name             = (const uint8_t *)s_device_name;
+    rsp_fields.name_len         = strlen(s_device_name);
+    rsp_fields.name_is_complete = 1;
+    rc = ble_gap_adv_rsp_set_fields(&rsp_fields);
+    if (rc != 0) ESP_LOGW(TAG, "adv_rsp_set_fields falhou (rc=%d)", rc);
 
     struct ble_gap_adv_params adv_params = {0};
     adv_params.conn_mode = BLE_GAP_CONN_MODE_UND;

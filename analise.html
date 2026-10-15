@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>KartBox — Análise de Sessão</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+  :root {
+    --bg: #14181f;
+    --panel: #1c222c;
+    --panel2: #232a36;
+    --border: #313a48;
+    --text: #e6e9ef;
+    --muted: #8a94a6;
+    --accent: #ff7a1a;
+    --green: #35c46a;
+    --red: #e5484d;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; min-height: 100%; background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+  h1 { font-size: 16px; margin: 0 0 4px; color: var(--accent); }
+  h2 { font-size: 12px; margin: 0 0 10px; color: var(--text); text-transform: uppercase; letter-spacing: .04em; }
+  .sub { font-size: 11px; color: var(--muted); line-height: 1.4; }
+  select { padding: 6px 8px; background: var(--panel2); border: 1px solid var(--border);
+    border-radius: 6px; color: var(--text); font-size: 12px; }
+  button { cursor: pointer; border: 1px solid var(--border); background: var(--panel2); color: var(--text);
+    padding: 8px 12px; border-radius: 6px; font-size: 12px; }
+  button:hover { border-color: var(--accent); }
+  button.on { border-color: var(--accent); color: var(--accent); }
+
+  #topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--panel); }
+  #topbar .info { flex: 1; }
+  #sess-line { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+  /* ── DROPZONE ── */
+  #dropzone { margin: 60px auto; max-width: 480px; border: 2px dashed var(--border); border-radius: 12px;
+    padding: 48px 24px; text-align: center; }
+  #dropzone.drag { border-color: var(--accent); background: var(--panel); }
+  #dropzone .big { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+  #file-input { display: none; }
+  #err-msg { color: var(--red); font-size: 12px; margin-top: 14px; min-height: 16px; }
+
+  /* ── LAYOUT PRINCIPAL ── */
+  #wrap { display: none; }
+  #row1 { display: flex; background: var(--border); align-items: stretch; }
+  #map-col { width: 50%; min-width: 0; flex: none; display: flex; flex-direction: column; background: var(--bg); }
+  #map { height: 420px; background: #0c0f14; }
+  #map-tools { display: flex; align-items: center; gap: 8px; padding: 10px 14px; flex-wrap: wrap; background: var(--panel); }
+  #map-tools .grow { flex: 1; min-width: 140px; }
+  #legend { display: flex; align-items: center; gap: 8px; padding: 8px 14px; background: var(--panel); font-size: 10px; color: var(--muted); }
+  #legend .bar { flex: 1; max-width: 240px; height: 8px; border-radius: 4px; }
+  #legend.speed .bar { background: linear-gradient(90deg,#3b82f6,#22c55e,#eab308,#ef4444); }
+  #legend.delta .bar { background: linear-gradient(90deg,#22c55e,#cbd5e1,#ef4444); }
+
+  #resizer { width: 6px; flex: none; cursor: col-resize; background: var(--panel2); position: relative; }
+  #resizer:hover, #resizer.dragging { background: var(--accent); }
+  #resizer::after { content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    width: 2px; height: 28px; background: var(--border); border-radius: 1px; }
+
+  #table-col { flex: 1; min-width: 260px; background: var(--panel); padding: 14px; overflow-y: auto; max-height: 420px; }
+  #stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+  .stat { background: var(--panel2); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; }
+  .stat .l { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .stat .v { font-size: 15px; font-weight: 600; margin-top: 3px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  th { text-align: right; color: var(--muted); font-weight: 500; padding: 5px 4px; border-bottom: 1px solid var(--border); font-size: 9px; text-transform: uppercase; }
+  th:first-child, td:first-child { text-align: left; }
+  td { text-align: right; padding: 5px 4px; border-bottom: 1px solid #222834; }
+  tr.best td { color: var(--green); font-weight: 600; }
+  td.pos { color: var(--red); }
+  td.neg { color: var(--green); }
+
+  /* ── COMPARAÇÃO ── */
+  #compare { padding: 18px 20px 40px; }
+  #cmp-controls { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+  #cmp-controls .lbl { font-size: 11px; color: var(--muted); }
+  .legend-row { display: flex; gap: 18px; font-size: 11px; margin-bottom: 6px; }
+  .legend-row span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend-row i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  .chart-box { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px; margin-bottom: 16px; }
+  canvas { width: 100%; height: 220px; display: block; }
+
+  @media (max-width: 900px) {
+    #row1 { flex-direction: column; }
+    #map-col { width: auto !important; }
+    #resizer { display: none; }
+    #table-col { width: auto; max-height: none; }
+  }
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <div class="info">
+    <h1>KARTBOX — ANÁLISE DE SESSÃO</h1>
+    <div id="sess-line" class="sub">Nenhum arquivo carregado</div>
+  </div>
+  <button onclick="document.getElementById('file-input').click()">Carregar outro CSV</button>
+</div>
+
+<div id="dropzone">
+  <div class="big">Arraste o CSV da sessão aqui</div>
+  <div class="sub">ou clique para escolher o arquivo — baixado pela aba SESSÕES do app KartBox.<br>Tudo roda no navegador, nada é enviado a servidor nenhum.</div>
+  <div style="margin-top:18px"><button onclick="document.getElementById('file-input').click()">Escolher arquivo</button></div>
+  <div id="err-msg"></div>
+</div>
+<input type="file" id="file-input" accept=".csv,text/csv">
+
+<div id="wrap">
+  <div id="row1">
+    <div id="map-col">
+      <div id="map"></div>
+      <div id="map-tools">
+        <div class="grow">
+          <select id="sel-map-lap"></select>
+        </div>
+        <button id="btn-mode-speed" class="on" onclick="setMapMode('speed')">Velocidade</button>
+        <button id="btn-mode-delta" onclick="setMapMode('delta')">Delta</button>
+      </div>
+      <div id="legend" class="speed">
+        <span id="legend-min">—</span>
+        <div class="bar"></div>
+        <span id="legend-max">—</span>
+      </div>
+    </div>
+    <div id="resizer"></div>
+    <div id="table-col">
+      <h2>Consistência</h2>
+      <div id="stats-grid"></div>
+      <table>
+        <thead><tr><th>Volta</th><th>Tempo</th><th>Delta</th><th>Vel.máx</th><th>Vel.méd</th></tr></thead>
+        <tbody id="lap-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="compare">
+    <h2>Comparação de voltas</h2>
+    <div id="cmp-controls">
+      <span class="lbl">Volta A</span>
+      <select id="sel-a"></select>
+      <span class="lbl">Volta B</span>
+      <select id="sel-b"></select>
+    </div>
+
+    <div class="chart-box">
+      <div class="legend-row">
+        <span><i style="background:#3b82f6"></i>Velocidade — Volta A</span>
+        <span><i style="background:#ff7a1a"></i>Velocidade — Volta B</span>
+      </div>
+      <canvas id="chart-speed"></canvas>
+    </div>
+
+    <div class="chart-box">
+      <div class="legend-row">
+        <span><i style="background:#3b82f6"></i>Delta — Volta A (vs melhor da sessão)</span>
+        <span><i style="background:#ff7a1a"></i>Delta — Volta B (vs melhor da sessão)</span>
+      </div>
+      <canvas id="chart-delta"></canvas>
+    </div>
+  </div>
+</div>
+
+<script>
+let laps = [];
+let allRows = [];
+let mapMode = 'speed';
+let map, layerGroup;
+
+/* ── parsing ── */
+
+function distM(lat1, lon1, lat2, lon2) {
+  const R = 6371000, toRad = Math.PI / 180;
+  const dLat = (lat2 - lat1) * toRad, dLon = (lon2 - lon1) * toRad;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+function parseCSV(text) {
+  const lines = text.trim().split(/\r?\n/);
+  if (lines.length < 2) throw new Error('CSV vazio ou sem dados');
+  const header = lines[0].split(',').map(s => s.trim());
+  const idx = {};
+  header.forEach((h, i) => idx[h] = i);
+  const need = ['t_ms', 'lat', 'lon', 'speed_kmh', 'lap', 'lap_time_ms', 'best_lap_ms', 'delta_ms'];
+  for (const k of need) if (!(k in idx)) throw new Error('Coluna ausente no CSV: ' + k);
+  const hasSectors = ('s1_ms' in idx) && ('s2_ms' in idx);
+
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    if (!lines[i]) continue;
+    const p = lines[i].split(',');
+    if (p.length < header.length) continue;
+    const lat = +p[idx.lat], lon = +p[idx.lon];
+    if (!isFinite(lat) || !isFinite(lon) || (lat === 0 && lon === 0)) continue;
+    rows.push({
+      t_ms: +p[idx.t_ms], lat, lon,
+      speed: +p[idx.speed_kmh],
+      lap: +p[idx.lap],
+      lap_time_ms: +p[idx.lap_time_ms],
+      best_lap_ms: +p[idx.best_lap_ms],
+      delta_ms: +p[idx.delta_ms],
+      s1_ms: hasSectors ? +p[idx.s1_ms] : null,
+      s2_ms: hasSectors ? +p[idx.s2_ms] : null,
+    });
+  }
+  if (!rows.length) throw new Error('Nenhuma amostra válida encontrada');
+  return rows;
+}
+
+function buildLaps(rows) {
+  const groups = new Map();
+  for (const r of rows) {
+    if (!groups.has(r.lap)) groups.set(r.lap, []);
+    groups.get(r.lap).push(r);
+  }
+  const out = [];
+  for (const [lapNum, rs] of groups) {
+    if (lapNum < 1 || rs.length < 3) continue;
+    rs[0].dist = 0;
+    let dist = 0;
+    for (let i = 1; i < rs.length; i++) {
+      dist += distM(rs[i - 1].lat, rs[i - 1].lon, rs[i].lat, rs[i].lon);
+      rs[i].dist = dist;
+    }
+    const last = rs[rs.length - 1];
+    const speeds = rs.map(r => r.speed);
+    let seg = null;
+    if (last.s1_ms != null && last.s1_ms > 0) {
+      seg = {
+        s1: last.s1_ms,
+        s2: last.s2_ms > 0 ? last.s2_ms - last.s1_ms : null,
+        s3: (last.s2_ms > 0 && last.lap_time_ms > 0) ? last.lap_time_ms - last.s2_ms : null,
+      };
+    }
+    out.push({
+      lap: lapNum, rows: rs, timeMs: last.lap_time_ms, length: dist, seg,
+      maxSpeed: Math.max(...speeds),
+      avgSpeed: speeds.reduce((a, b) => a + b, 0) / speeds.length,
+    });
+  }
+  out.sort((a, b) => a.lap - b.lap);
+  return out;
+}
+
+/* ── formatação ── */
+
+function fmtTime(ms) {
+  if (!ms || ms <= 0) return '—';
+  const m = Math.floor(ms / 60000);
+  const s = Math.floor((ms % 60000) / 1000);
+  const mm = Math.floor(ms % 1000);
+  return m + ':' + String(s).padStart(2, '0') + '.' + String(mm).padStart(3, '0');
+}
+
+function fmtDelta(ms) {
+  if (ms === null || ms === undefined) return '—';
+  if (ms === 0) return '0.000';
+  const sign = ms < 0 ? '−' : '+';
+  return sign + (Math.abs(ms) / 1000).toFixed(3);
+}
+
+function fmtAxisNum(v, decimals) {
+  const s = v.toFixed(decimals);
+  return /^-0(\.0+)?$/.test(s) ? s.slice(1) : s;
+}
+
+/* ── cores ── */
+
+function hexToRgb(h) { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
+function rgbToHex(r, g, b) { return '#' + [r, g, b].map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join(''); }
+function lerp(c1, c2, t) { const a = hexToRgb(c1), b = hexToRgb(c2); return rgbToHex(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t); }
+function gradient(t, stops) {
+  t = Math.max(0, Math.min(1, t));
+  const n = stops.length - 1, seg = t * n, i = Math.min(n - 1, Math.floor(seg));
+  return lerp(stops[i], stops[i + 1], seg - i);
+}
+const SPEED_STOPS = ['#3b82f6', '#22c55e', '#eab308', '#ef4444'];
+const DELTA_STOPS = ['#22c55e', '#cbd5e1', '#ef4444'];
+
+/* ── mapa ── */
+
+function initMap() {
+  map = L.map('map', { zoomControl: true }).setView([0, 0], 2);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 20, attribution: '© OpenStreetMap'
+  }).addTo(map);
+  layerGroup = L.layerGroup().addTo(map);
+}
+
+function initResizer() {
+  const resizer = document.getElementById('resizer');
+  const mapCol = document.getElementById('map-col');
+  const row1 = document.getElementById('row1');
+  let dragging = false;
+
+  resizer.addEventListener('pointerdown', e => {
+    dragging = true;
+    resizer.setPointerCapture(e.pointerId);
+    resizer.classList.add('dragging');
+  });
+  resizer.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    const rect = row1.getBoundingClientRect();
+    const min = 260, max = rect.width - 260 - 6;
+    const w = Math.max(min, Math.min(max, e.clientX - rect.left));
+    mapCol.style.width = w + 'px';
+    if (map) map.invalidateSize();
+  });
+  ['pointerup', 'pointercancel'].forEach(ev => resizer.addEventListener(ev, () => {
+    dragging = false;
+    resizer.classList.remove('dragging');
+  }));
+}
+
+function decimate(rows, maxPoints) {
+  if (rows.length <= maxPoints) return rows;
+  const step = Math.ceil(rows.length / maxPoints);
+  const out = [];
+  for (let i = 0; i < rows.length; i += step) out.push(rows[i]);
+  if (out[out.length - 1] !== rows[rows.length - 1]) out.push(rows[rows.length - 1]);
+  return out;
+}
+
+function setMapMode(mode) {
+  mapMode = mode;
+  document.getElementById('btn-mode-speed').classList.toggle('on', mode === 'speed');
+  document.getElementById('btn-mode-delta').classList.toggle('on', mode === 'delta');
+  document.getElementById('legend').className = mode;
+  renderMap();
+}
+
+function renderMap() {
+  layerGroup.clearLayers();
+
+  const ctxRows = decimate(allRows, 1500);
+  L.polyline(ctxRows.map(r => [r.lat, r.lon]), { color: '#3a4353', weight: 2, opacity: .6 }).addTo(layerGroup);
+
+  const lapNum = +document.getElementById('sel-map-lap').value;
+  const lap = laps.find(l => l.lap === lapNum);
+  if (!lap) return;
+
+  const pts = decimate(lap.rows, 500);
+  let lo, hi;
+  if (mapMode === 'speed') {
+    lo = lap.maxSpeed > 0 ? Math.min(...pts.map(p => p.speed)) : 0;
+    hi = lap.maxSpeed;
+    document.getElementById('legend-min').textContent = lo.toFixed(0) + ' km/h';
+    document.getElementById('legend-max').textContent = hi.toFixed(0) + ' km/h';
+  } else {
+    document.getElementById('legend-min').textContent = 'ganhando';
+    document.getElementById('legend-max').textContent = 'perdendo';
+  }
+
+  for (let i = 1; i < pts.length; i++) {
+    const p0 = pts[i - 1], p1 = pts[i];
+    let color;
+    if (mapMode === 'speed') {
+      const t = hi > lo ? (p1.speed - lo) / (hi - lo) : .5;
+      color = gradient(t, SPEED_STOPS);
+    } else {
+      const t = (Math.max(-800, Math.min(800, p1.delta_ms)) + 800) / 1600;
+      color = gradient(t, DELTA_STOPS);
+    }
+    L.polyline([[p0.lat, p0.lon], [p1.lat, p1.lon]], { color, weight: 5 }).addTo(layerGroup);
+  }
+
+  const bounds = L.latLngBounds(lap.rows.map(r => [r.lat, r.lon]));
+  map.fitBounds(bounds, { padding: [24, 24] });
+}
+
+/* ── tabela + stats ── */
+
+function renderTable() {
+  const bestLap = laps.reduce((b, l) => (!b || l.timeMs < b.timeMs) ? l : b, null);
+  const times = laps.map(l => l.timeMs);
+  const mean = times.reduce((a, b) => a + b, 0) / times.length;
+  const variance = times.reduce((a, b) => a + (b - mean) ** 2, 0) / times.length;
+  const stddev = Math.sqrt(variance);
+
+  let ideal = null;
+  if (laps.some(l => l.seg)) {
+    const s1s = laps.filter(l => l.seg && l.seg.s1 > 0).map(l => l.seg.s1);
+    const s2s = laps.filter(l => l.seg && l.seg.s2 > 0).map(l => l.seg.s2);
+    const s3s = laps.filter(l => l.seg && l.seg.s3 > 0).map(l => l.seg.s3);
+    if (s1s.length && s2s.length && s3s.length) {
+      ideal = Math.min(...s1s) + Math.min(...s2s) + Math.min(...s3s);
+    }
+  }
+
+  const stats = [
+    ['Voltas', laps.length],
+    ['Melhor volta', fmtTime(bestLap.timeMs)],
+    ['Média', fmtTime(mean)],
+    ['Consistência (±)', (stddev / 1000).toFixed(3) + 's'],
+  ];
+  if (ideal) stats.push(['Volta ideal', fmtTime(ideal)]);
+
+  document.getElementById('stats-grid').innerHTML = stats.map(([l, v]) =>
+    `<div class="stat"><div class="l">${l}</div><div class="v">${v}</div></div>`).join('');
+
+  document.getElementById('lap-tbody').innerHTML = laps.map(l => {
+    const delta = l.timeMs - bestLap.timeMs;
+    const dCls = delta === 0 ? '' : (delta > 0 ? 'pos' : 'neg');
+    return `<tr class="${l === bestLap ? 'best' : ''}">
+      <td>${l === bestLap ? '★ ' : ''}${l.lap}</td>
+      <td>${fmtTime(l.timeMs)}</td>
+      <td class="${dCls}">${delta === 0 ? '—' : fmtDelta(delta)}</td>
+      <td>${l.maxSpeed.toFixed(0)}</td>
+      <td>${l.avgSpeed.toFixed(0)}</td>
+    </tr>`;
+  }).join('');
+}
+
+/* ── gráficos de comparação ── */
+
+function drawChart(canvas, series, yFmt) {
+  const cssW = canvas.clientWidth, cssH = canvas.clientHeight;
+  canvas.width = cssW; canvas.height = cssH;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, cssW, cssH);
+
+  const pad = { l: 42, r: 10, t: 10, b: 20 };
+  const allPts = series.flatMap(s => s.points);
+  if (!allPts.length) return;
+  const xMax = Math.max(...allPts.map(p => p.x));
+  let yMin = Math.min(...allPts.map(p => p.y));
+  let yMax = Math.max(...allPts.map(p => p.y));
+  if (yMin > 0) yMin = 0;
+  if (yMax < 0) yMax = 0;
+  if (yMax === yMin) yMax = yMin + 1;
+
+  const X = x => pad.l + (x / xMax) * (cssW - pad.l - pad.r);
+  const Y = y => cssH - pad.b - ((y - yMin) / (yMax - yMin)) * (cssH - pad.t - pad.b);
+
+  ctx.strokeStyle = '#2a3140';
+  ctx.fillStyle = '#8a94a6';
+  ctx.font = '10px -apple-system,Arial';
+  ctx.lineWidth = 1;
+  const divs = 4;
+  for (let i = 0; i <= divs; i++) {
+    const yv = yMin + (yMax - yMin) * i / divs;
+    const yy = Y(yv);
+    ctx.beginPath(); ctx.moveTo(pad.l, yy); ctx.lineTo(cssW - pad.r, yy); ctx.stroke();
+    ctx.fillText(yFmt(yv), 2, yy + 3);
+  }
+  if (yMin < 0 && yMax > 0) {
+    ctx.strokeStyle = '#4a5568';
+    ctx.setLineDash([4, 3]);
+    const yy = Y(0);
+    ctx.beginPath(); ctx.moveTo(pad.l, yy); ctx.lineTo(cssW - pad.r, yy); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  ctx.fillText('0m', pad.l, cssH - 6);
+  ctx.fillText(xMax.toFixed(0) + 'm', cssW - pad.r - 30, cssH - 6);
+
+  for (const s of series) {
+    ctx.strokeStyle = s.color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    s.points.forEach((p, i) => {
+      const xx = X(p.x), yy = Y(p.y);
+      if (i === 0) ctx.moveTo(xx, yy); else ctx.lineTo(xx, yy);
+    });
+    ctx.stroke();
+  }
+}
+
+function renderCharts() {
+  const lapA = laps.find(l => l.lap === +document.getElementById('sel-a').value);
+  const lapB = laps.find(l => l.lap === +document.getElementById('sel-b').value);
+  if (!lapA || !lapB) return;
+
+  drawChart(document.getElementById('chart-speed'), [
+    { color: '#3b82f6', points: decimate(lapA.rows, 300).map(r => ({ x: r.dist, y: r.speed })) },
+    { color: '#ff7a1a', points: decimate(lapB.rows, 300).map(r => ({ x: r.dist, y: r.speed })) },
+  ], v => fmtAxisNum(v, 0));
+
+  drawChart(document.getElementById('chart-delta'), [
+    { color: '#3b82f6', points: decimate(lapA.rows, 300).map(r => ({ x: r.dist, y: r.delta_ms / 1000 })) },
+    { color: '#ff7a1a', points: decimate(lapB.rows, 300).map(r => ({ x: r.dist, y: r.delta_ms / 1000 })) },
+  ], v => fmtAxisNum(v, 1) + 's');
+}
+
+/* ── carregamento ── */
+
+function loadFile(file) {
+  const errEl = document.getElementById('err-msg');
+  errEl.textContent = '';
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      allRows = parseCSV(reader.result);
+      laps = buildLaps(allRows);
+      if (!laps.length) throw new Error('Nenhuma volta completa encontrada nesta sessão');
+      onSessionLoaded(file.name);
+    } catch (e) {
+      errEl.textContent = 'Erro: ' + e.message;
+    }
+  };
+  reader.onerror = () => errEl.textContent = 'Erro ao ler o arquivo';
+  reader.readAsText(file);
+}
+
+function onSessionLoaded(filename) {
+  document.getElementById('dropzone').style.display = 'none';
+  document.getElementById('wrap').style.display = 'block';
+  if (!map) { initMap(); initResizer(); }
+  else map.invalidateSize();
+
+  const bestLap = laps.reduce((b, l) => (!b || l.timeMs < b.timeMs) ? l : b, null);
+  document.getElementById('sess-line').textContent =
+    filename + ' · ' + laps.length + ' voltas · melhor ' + fmtTime(bestLap.timeMs);
+
+  const lapOpts = laps.map(l => `<option value="${l.lap}">Volta ${l.lap} — ${fmtTime(l.timeMs)}</option>`).join('');
+  document.getElementById('sel-map-lap').innerHTML = lapOpts;
+  document.getElementById('sel-map-lap').value = bestLap.lap;
+  document.getElementById('sel-map-lap').onchange = renderMap;
+
+  document.getElementById('sel-a').innerHTML = lapOpts;
+  document.getElementById('sel-b').innerHTML = lapOpts;
+  document.getElementById('sel-a').value = bestLap.lap;
+  const other = laps.find(l => l.lap !== bestLap.lap) || bestLap;
+  document.getElementById('sel-b').value = other.lap;
+  document.getElementById('sel-a').onchange = renderCharts;
+  document.getElementById('sel-b').onchange = renderCharts;
+
+  setMapMode('speed');
+  renderTable();
+  renderCharts();
+}
+
+const dz = document.getElementById('dropzone');
+const fi = document.getElementById('file-input');
+dz.addEventListener('click', () => fi.click());
+fi.addEventListener('change', () => { if (fi.files[0]) loadFile(fi.files[0]); });
+['dragenter', 'dragover'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add('drag'); }));
+['dragleave', 'drop'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove('drag'); }));
+dz.addEventListener('drop', e => { if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]); });
+
+window.addEventListener('resize', () => { if (laps.length) renderCharts(); });
+</script>
+</body>
+</html>
